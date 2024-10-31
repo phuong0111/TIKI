@@ -1,7 +1,7 @@
 import sys
 
 # input
-with open("tc/6/inp.txt") as f:
+with open("tc/2/inp.txt") as f:
     sys.stdin = f
     # request = {id: (size, time)}
     requests: dict[int, tuple[int, int]] = {}
@@ -32,9 +32,9 @@ with open("tc/6/inp.txt") as f:
         line = input()
         if line == '#':
             break
-        id, size, time = map(int, line.split()[1:3] + line.split()[-1:])
-        requests[id] = (size, time)
-    
+        _ = line.split()
+        id, size, pickup_duration, drop_duration = int(_[1]), int(_[2]), int(_[5]), int(_[8])
+        requests[id] = (size, pickup_duration, drop_duration)
     
 PICKUP_CONTAINER = "PICKUP_CONTAINER"
 PICKUP_CONTAINER_TRAILER = "PICKUP_CONTAINER_TRAILER"
@@ -44,7 +44,7 @@ PICKUP_TRAILER = "PICKUP_TRAILER"
 DROP_TRAILER = "DROP_TRAILER"
 STOP = "STOP"
     
-alpha = 1000
+alpha = 100000
 def checkValidRouteAndCalculateScore(truck_id: int, routes: list[str]):
     has_trailer = False
     current_container = []
@@ -79,12 +79,13 @@ def checkValidRouteAndCalculateScore(truck_id: int, routes: list[str]):
             if len(current_container) > 0:
                 return False, f"Truck {truck_id} at point {point} has container, can not do action {action}", 0
         route_score += distances[prev_point][point] 
+        prev_point = point
         if request_id:
-            route_score += requests[request_id][1]
+            route_score += requests[request_id][1] if "pickup" in action.lower() else requests[request_id][2]
     return True, "Correct answer", route_score
     
 # output
-with open("tc/6/out.txt") as f:
+with open("tc/2/out.txt") as f:
     sys.stdin = f
     _ = int(input().split()[-1]) 
     assert _ == num_of_routes
