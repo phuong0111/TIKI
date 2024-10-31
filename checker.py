@@ -1,10 +1,10 @@
 import sys
 
 # input
-with open("tc/2/inp.txt") as f:
+with open("tc/4/inp.txt") as f:
     sys.stdin = f
-    # request = {id: (size, time)}
-    requests: dict[int, tuple[int, int]] = {}
+    # request = {id: (size, pickup_duration, drop_duration)}
+    requests: dict[int, tuple[int, int, int]] = {}
     # trucks = {id: depot}
     trucks: dict[int, int] = {}
     # num of point
@@ -45,51 +45,71 @@ DROP_TRAILER = "DROP_TRAILER"
 STOP = "STOP"
     
 alpha = 100000
+
 def checkValidRouteAndCalculateScore(truck_id: int, routes: list[str]):
     has_trailer = False
     current_container = []
-    route_score = 0
+    travel_time = 0  # F2 component - only travel time
+    completion_time = 0  # Track total time including service times
     prev_point = trucks[truck_id]
+    
     for stop in routes:
         stop = stop.split()
         point, action, request_id = int(stop[0]), stop[1], None
         if len(stop) == 3:
             request_id = int(stop[2])
         
+        # Validate trailer and container operations
         if action in [PICKUP_CONTAINER_TRAILER, PICKUP_TRAILER]:
             if has_trailer:
-                return False, f"Truck {truck_id} at point {point} already has already trailer, can not do action {action}", 0
+                return False, f"Truck {truck_id} at point {point} already has already trailer, can not do action {action}", 0, 0
             has_trailer = True
+            
         if action in [PICKUP_CONTAINER, PICKUP_CONTAINER_TRAILER]:
             total = sum([_[1] for _ in current_container])
             current_container.append((request_id, requests[request_id][0]))
             if total + requests[request_id][0] > 40:
-                return False, f"Truck {truck_id} at point {point} already has load {total}, can not do action {action} with demand {requests[request_id][0]}", 0
+                return False, f"Truck {truck_id} at point {point} already has load {total}, can not do action {action} with demand {requests[request_id][0]}", 0, 0
+                
         if action in [DROP_CONTAINER, DROP_CONTAINER_TRAILER]:
-            if any([_[0] == request_id for _ in current_container]) == False:
-                return False, f"Truck {truck_id} at point {point} has no container for request {request_id}, can not do action {action}", 0
+            if not any([_[0] == request_id for _ in current_container]):
+                return False, f"Truck {truck_id} at point {point} has no container for request {request_id}, can not do action {action}", 0, 0
             current_container.remove((request_id, requests[request_id][0]))
+            
         if action in [DROP_TRAILER, DROP_CONTAINER_TRAILER]:
-            if has_trailer == False:
-                return False, f"Truck {truck_id} at point {point} has no trailer, can not do action {action}", 0
+            if not has_trailer:
+                return False, f"Truck {truck_id} at point {point} has no trailer, can not do action {action}", 0, 0
             has_trailer = False
+            
         if action == STOP:
             if has_trailer:
-                return False, f"Truck {truck_id} at point {point} has trailer, can not do action {action}", 0
+                return False, f"Truck {truck_id} at point {point} has trailer, can not do action {action}", 0, 0
             if len(current_container) > 0:
-                return False, f"Truck {truck_id} at point {point} has container, can not do action {action}", 0
-        route_score += distances[prev_point][point] 
-        prev_point = point
+                return False, f"Truck {truck_id} at point {point} has container, can not do action {action}", 0, 0
+
+        # Update times
+        travel_time += distances[prev_point][point]  # Only travel time for F2
+        completion_time += distances[prev_point][point]  # Total time includes travel
+        
+        # Add service times to completion time only (not to travel time)
         if request_id:
-            route_score += requests[request_id][1] if "pickup" in action.lower() else requests[request_id][2]
-    return True, "Correct answer", route_score
-    
+            service_time = requests[request_id][1] if "pickup" in action.lower() else requests[request_id][2]
+            completion_time += service_time
+            
+        prev_point = point
+        
+    return True, "Correct answer", completion_time, travel_time
+
 # output
-with open("tc/2/out.txt") as f:
+with open("tc/4/out.txt") as f:
     sys.stdin = f
     _ = int(input().split()[-1]) 
     assert _ == num_of_routes
-    scores = []
+    completion_times = []  # For F1
+    travel_times = []     # For F2
+    
+    check = True
+    message = ""
     for _ in range(num_of_routes):
         truck_id = int(input().split()[-1]) 
         lines = []
@@ -98,16 +118,24 @@ with open("tc/2/out.txt") as f:
             if line == '#':
                 break
             lines.append(line)
-        check, message, score = checkValidRouteAndCalculateScore(truck_id=truck_id, routes=lines)
-        scores.append(score)
-        if check == False:
-            print(message)
+            
+        valid, msg, completion_time, travel_time = checkValidRouteAndCalculateScore(truck_id=truck_id, routes=lines)
+        if not valid:
+            check = False
+            message = msg
             break
             
+        completion_times.append(completion_time)
+        travel_times.append(travel_time)
+            
     if check:
-        print(f"{sum(scores) = }")
-        print(f"{max(scores) = }")
-        print(f"Score: {int(1e9) - (sum(scores) + alpha * max(scores))}")
+        F1 = max(completion_times)  # Maximum completion time
+        F2 = sum(travel_times)      # Total travel time
+        F = alpha * F1 + F2         # Combined objective
         
-        
-        
+        print(f"F1 (Max completion time) = {F1}")
+        print(f"F2 (Total travel time) = {F2}")
+        print(f"F = α*F1 + F2 = {alpha}*{F1} + {F2} = {F}")
+        print(f"Score = {int(1e9) - F}")
+    else:
+        print(message)
