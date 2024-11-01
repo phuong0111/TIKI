@@ -1,9 +1,3 @@
-// #include <algorithm>
-// #include <iostream>
-// #include <random>
-// #include <string>
-// #include <unordered_map>
-// #include <vector>
 #include <bits/stdc++.h>
 
 typedef long int ll;
@@ -18,7 +12,14 @@ enum Action {
     STOP
 };
 
-const std::vector<std::string> actions = {"PICKUP_CONTAINER", "PICKUP_CONTAINER_TRAILER", "DROP_CONTAINER", "DROP_CONTAINER_TRAILER", "PICKUP_TRAILER", "DROP_TRAILER", "STOP"};
+const std::vector<std::string> actions = {
+    "PICKUP_CONTAINER",
+    "PICKUP_CONTAINER_TRAILER",
+    "DROP_CONTAINER",
+    "DROP_CONTAINER_TRAILER",
+    "PICKUP_TRAILER",
+    "DROP_TRAILER",
+    "STOP"};
 
 enum ContainerSize {
     NONE = 0,
@@ -29,38 +30,118 @@ enum ContainerSize {
 struct Request {
     int id;
     ContainerSize size;
-    int pickup_point; // Now 1-based
+    int pickup_point;
     Action pickup_action;
     ll pickup_duration;
-    int drop_point; // Now 1-based
+    int drop_point;
     Action drop_action;
     ll drop_duration;
 };
 
-struct Stop {
-    int request_id; // -1 for trailer operations, otherwise 1-based
+struct StopNode {
+    int request_id;
     ContainerSize size;
-    int point; // Now 1-based
+    int point;
     Action action;
     ll duration;
+    StopNode *next;
+
+    // Constructor
+    StopNode(int req_id, ContainerSize sz, int pt, Action act, ll dur)
+        : request_id(req_id), size(sz), point(pt), action(act), duration(dur), next(nullptr) {}
+
+    // Copy constructor
+    StopNode(const StopNode &other)
+        : request_id(other.request_id),
+          size(other.size),
+          point(other.point),
+          action(other.action),
+          duration(other.duration),
+          next(nullptr) {}
 };
 
 struct Route {
-    int depot; // Now 1-based
-    std::vector<Stop> stops;
+    int depot;
+    StopNode *stops;
     ll cost;
+
+    // Default constructor
+    Route() : depot(0), stops(nullptr), cost(0) {}
+
+    // Constructor with depot
+    Route(int d) : depot(d), stops(nullptr), cost(0) {}
+
+    // Deep copy constructor
+    Route(const Route &other) : depot(other.depot), cost(other.cost) {
+        if (other.stops == nullptr) {
+            stops = nullptr;
+            return;
+        }
+
+        stops = new StopNode(*other.stops);
+        StopNode *curr = stops;
+        StopNode *otherCurr = other.stops->next;
+
+        while (otherCurr != nullptr) {
+            curr->next = new StopNode(*otherCurr);
+            curr = curr->next;
+            otherCurr = otherCurr->next;
+        }
+    }
+
+    // Assignment operator
+    Route &operator=(const Route &other) {
+        if (this != &other) {
+            // Delete existing nodes
+            StopNode *current = stops;
+            while (current != nullptr) {
+                StopNode *next = current->next;
+                delete current;
+                current = next;
+            }
+
+            depot = other.depot;
+            cost = other.cost;
+
+            if (other.stops == nullptr) {
+                stops = nullptr;
+                return *this;
+            }
+
+            stops = new StopNode(*other.stops);
+            StopNode *curr = stops;
+            StopNode *otherCurr = other.stops->next;
+
+            while (otherCurr != nullptr) {
+                curr->next = new StopNode(*otherCurr);
+                curr = curr->next;
+                otherCurr = otherCurr->next;
+            }
+        }
+        return *this;
+    }
+
+    // Destructor
+    ~Route() {
+        StopNode *current = stops;
+        while (current != nullptr) {
+            StopNode *next = current->next;
+            delete current;
+            current = next;
+        }
+    }
+
+    // Get size of the route (number of stops)
+    size_t size() const {
+        size_t count = 0;
+        StopNode *current = stops;
+        while (current != nullptr) {
+            count++;
+            current = current->next;
+        }
+        return count;
+    }
 };
-
-int getTotalContainerSize(const std::vector<std::pair<int, ContainerSize>> &request_id_container) {
-    int totalSize = 0;
-    for (std::pair<int, ContainerSize> x : request_id_container)
-        totalSize += x.second;
-    return totalSize;
-}
-
-bool getValidTotalContainerSize(const std::vector<std::pair<int, ContainerSize>> &request_id_container) {
-    return getTotalContainerSize(request_id_container) <= 40;
-}
 
 class PDPSolver {
   private:
@@ -71,13 +152,99 @@ class PDPSolver {
     std::vector<Route> currentSolution;
     std::random_device rd;
     std::mt19937 gen;
-    int alpha;
-    int trailer_point; // Now 1-based
+    int alpha = 100000;
+    int trailer_point;
     int trailer_pickup_time;
     int max_iterations;
     bool verbose;
     const double temperature = 100.0;
     const double coolingRate = 0.9995;
+
+  public:
+    // Helper function to add a stop to the end of route
+    void addStop(Route &route, const StopNode &stop) {
+        StopNode *newNode = new StopNode(stop);
+        if (route.stops == nullptr) {
+            route.stops = newNode;
+        } else {
+            StopNode *curr = route.stops;
+            while (curr->next != nullptr) {
+                curr = curr->next;
+            }
+            curr->next = newNode;
+        }
+    }
+
+    // Helper function to insert a stop at specific position
+    void insertStop(Route &route, const StopNode &stop, int position) {
+        StopNode *newNode = new StopNode(stop);
+        if (position == 0) {
+            newNode->next = route.stops;
+            route.stops = newNode;
+            return;
+        }
+
+        StopNode *curr = route.stops;
+        int currentPos = 0;
+        while (curr != nullptr && currentPos < position - 1) {
+            curr = curr->next;
+            currentPos++;
+        }
+
+        if (curr != nullptr) {
+            newNode->next = curr->next;
+            curr->next = newNode;
+        }
+    }
+
+    // Helper function to remove a stop from specific position
+    void removeStop(Route &route, int position) {
+        if (route.stops == nullptr)
+            return;
+
+        if (position == 0) {
+            StopNode *temp = route.stops;
+            route.stops = route.stops->next;
+            delete temp;
+            return;
+        }
+
+        StopNode *curr = route.stops;
+        int currentPos = 0;
+        while (curr != nullptr && currentPos < position - 1) {
+            curr = curr->next;
+            currentPos++;
+        }
+
+        if (curr != nullptr && curr->next != nullptr) {
+            StopNode *temp = curr->next;
+            curr->next = curr->next->next;
+            delete temp;
+        }
+    }
+
+    // Helper function to remove stops by request ID
+    void removeStopsByRequestId(Route &route, int requestId) {
+        while (route.stops != nullptr && route.stops->request_id == requestId) {
+            StopNode *temp = route.stops;
+            route.stops = route.stops->next;
+            delete temp;
+        }
+
+        if (route.stops == nullptr)
+            return;
+
+        StopNode *curr = route.stops;
+        while (curr->next != nullptr) {
+            if (curr->next->request_id == requestId) {
+                StopNode *temp = curr->next;
+                curr->next = curr->next->next;
+                delete temp;
+            } else {
+                curr = curr->next;
+            }
+        }
+    }
 
     ll getDistance(int from, int to) {
         return distances[from][to];
@@ -85,136 +252,141 @@ class PDPSolver {
 
     bool isRouteValid(const Route &route) {
         bool has_trailer = false;
-        int current_load = 0; // Track current load
+        int current_load = 0;
         std::vector<std::pair<int, ContainerSize>> current_container;
 
-        for (auto stop : route.stops) {
+        StopNode *curr = route.stops;
+        while (curr != nullptr) {
             // Trailer logic
-            if (stop.action == PICKUP_TRAILER || stop.action == PICKUP_CONTAINER_TRAILER) {
+            if (curr->action == PICKUP_TRAILER || curr->action == PICKUP_CONTAINER_TRAILER) {
                 if (has_trailer)
                     return false;
                 has_trailer = true;
             }
 
             // Container pickup logic
-            if (stop.action == PICKUP_CONTAINER) {
+            if (curr->action == PICKUP_CONTAINER) {
                 if (!has_trailer)
                     return false;
-                // Check if adding this container would exceed capacity
-                if (current_load + static_cast<int>(stop.size) > FORTY_FT)
+                if (current_load + static_cast<int>(curr->size) > FORTY_FT)
                     return false;
-                current_load += static_cast<int>(stop.size);
-                current_container.push_back({stop.request_id, stop.size});
-            } else if (stop.action == PICKUP_CONTAINER_TRAILER) {
-                // Check if adding this container would exceed capacity
-                if (current_load + static_cast<int>(stop.size) > FORTY_FT)
+                current_load += static_cast<int>(curr->size);
+                current_container.push_back({curr->request_id, curr->size});
+            } else if (curr->action == PICKUP_CONTAINER_TRAILER) {
+                if (current_load + static_cast<int>(curr->size) > FORTY_FT)
                     return false;
-                current_load += static_cast<int>(stop.size);
-                current_container.push_back({stop.request_id, stop.size});
+                current_load += static_cast<int>(curr->size);
+                current_container.push_back({curr->request_id, curr->size});
             }
 
             // Container drop logic
-            if (stop.action == DROP_CONTAINER || stop.action == DROP_CONTAINER_TRAILER) {
+            if (curr->action == DROP_CONTAINER || curr->action == DROP_CONTAINER_TRAILER) {
                 if (!has_trailer)
                     return false;
                 auto it = std::find_if(current_container.begin(), current_container.end(),
-                                       [stop](const std::pair<int, ContainerSize> &element) {
-                                           return element.first == stop.request_id;
+                                       [curr](const std::pair<int, ContainerSize> &element) {
+                                           return element.first == curr->request_id;
                                        });
                 if (it == current_container.end())
                     return false;
-                current_load -= static_cast<int>(it->second); // Reduce current load
+                current_load -= static_cast<int>(it->second);
                 current_container.erase(it);
             }
 
             // Trailer drop logic
-            if (stop.action == DROP_TRAILER || stop.action == DROP_CONTAINER_TRAILER) {
+            if (curr->action == DROP_TRAILER || curr->action == DROP_CONTAINER_TRAILER) {
                 if (!has_trailer)
                     return false;
-                if (current_container.size() > 0)
+                if (!current_container.empty())
                     return false;
                 has_trailer = false;
             }
+
+            curr = curr->next;
         }
 
-        // Final checks
-        if (has_trailer)
-            return false;
-        if (!current_container.empty())
-            return false;
-        if (current_load != 0) // Ensure all containers have been dropped
-            return false;
-
-        return true;
+        return !has_trailer && current_container.empty() && current_load == 0;
     }
 
-    ll calculateRouteCost(const Route &route) {
-        if (route.stops.empty())
+    ll calculateRouteCost(const Route &route, bool debug = false) {
+        if (route.stops == nullptr)
             return getDistance(route.depot, route.depot);
 
-        ll totalCost = getDistance(route.depot, route.stops[0].point);
-        totalCost += route.stops[0].duration;
+        ll totalCost = getDistance(route.depot, route.stops->point);
+        totalCost += route.stops->duration;
 
-        for (size_t i = 0; i < route.stops.size() - 1; i++) {
-            totalCost += getDistance(route.stops[i].point, route.stops[i + 1].point);
-            totalCost += route.stops[i + 1].duration;
+        StopNode *curr = route.stops;
+        while (curr->next != nullptr) {
+            totalCost += getDistance(curr->point, curr->next->point);
+            totalCost += curr->next->duration;
+            curr = curr->next;
         }
 
-        totalCost += getDistance(route.stops.back().point, route.depot);
+        totalCost += getDistance(curr->point, route.depot);
 
         return totalCost;
     }
 
     void updateTrailerOperations(Route &route) {
-        route.stops.erase(
-            std::remove_if(route.stops.begin(), route.stops.end(),
-                           [](const Stop &stop) { return stop.request_id == -1; }),
-            route.stops.end());
+        // Remove all existing trailer operations
+        StopNode *curr = route.stops;
+        StopNode *prev = nullptr;
 
-        if (route.stops.empty())
+        while (curr != nullptr) {
+            if (curr->request_id == -1) {
+                if (prev == nullptr) {
+                    route.stops = curr->next;
+                    delete curr;
+                    curr = route.stops;
+                } else {
+                    prev->next = curr->next;
+                    delete curr;
+                    curr = prev->next;
+                }
+            } else {
+                prev = curr;
+                curr = curr->next;
+            }
+        }
+
+        if (route.stops == nullptr)
             return;
 
         bool current_has_trailer = false;
-        std::vector<Stop> new_stops;
+        Route newRoute(route.depot);
 
-        Stop pickup_trailer = {
-            -1,
-            NONE,
-            trailer_point,
-            PICKUP_TRAILER,
-            trailer_pickup_time};
-
-        if (route.stops[0].action == PICKUP_CONTAINER) {
-            new_stops.push_back(pickup_trailer);
+        // Add trailer pickup if needed for first stop
+        if (route.stops->action == PICKUP_CONTAINER) {
+            addStop(newRoute, StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time));
             current_has_trailer = true;
         }
 
-        for (const Stop &stop : route.stops) {
-            if (!current_has_trailer && stop.action == PICKUP_CONTAINER) {
-                new_stops.push_back(pickup_trailer);
+        // Process all stops
+        curr = route.stops;
+        while (curr != nullptr) {
+            if (!current_has_trailer && curr->action == PICKUP_CONTAINER) {
+                addStop(newRoute, StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time));
                 current_has_trailer = true;
             }
 
-            new_stops.push_back(stop);
+            addStop(newRoute, *curr);
 
-            if (stop.action == PICKUP_CONTAINER_TRAILER) {
+            if (curr->action == PICKUP_CONTAINER_TRAILER) {
                 current_has_trailer = true;
-            } else if (stop.action == DROP_CONTAINER_TRAILER) {
+            } else if (curr->action == DROP_CONTAINER_TRAILER) {
                 current_has_trailer = false;
             }
+
+            curr = curr->next;
         }
 
+        // Add final trailer drop if needed
         if (current_has_trailer) {
-            Stop drop_trailer = {
-                -1,
-                NONE,
-                trailer_point,
-                DROP_TRAILER,
-                trailer_pickup_time};
-            new_stops.push_back(drop_trailer);
+            addStop(newRoute, StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time));
         }
 
-        route.stops = new_stops;
+        route = newRoute;
+        route.cost = calculateRouteCost(newRoute);
     }
 
     void removeRandomRequests(std::vector<int> &requestsToRemove, int count) {
@@ -222,59 +394,48 @@ class PDPSolver {
         int max_attemp = 20;
         int attempt = 0;
 
-        while (requestsToRemove.size() < count or attempt++ < max_attemp) {
+        while (requestsToRemove.size() < count && attempt++ < max_attemp) {
             int routeIdx = routeDist(gen);
             Route &route = currentSolution[routeIdx];
 
-            if (!route.stops.empty()) {
-                std::vector<size_t> containerStopIndices;
-                for (size_t i = 0; i < route.stops.size(); i++) {
-                    if (route.stops[i].request_id != -1) {
-                        containerStopIndices.push_back(i);
+            if (route.stops != nullptr) {
+                // Count valid stops
+                std::vector<int> validRequestIds;
+                StopNode *curr = route.stops;
+                while (curr != nullptr) {
+                    if (curr->request_id != -1 &&
+                        std::find(requestsToRemove.begin(), requestsToRemove.end(), curr->request_id) == requestsToRemove.end()) {
+                        validRequestIds.push_back(curr->request_id);
                     }
+                    curr = curr->next;
                 }
 
-                if (!containerStopIndices.empty()) {
-                    std::uniform_int_distribution<> stopDist(0, containerStopIndices.size() - 1);
-                    size_t selectedIdx = containerStopIndices[stopDist(gen)];
-                    int req_id = route.stops[selectedIdx].request_id;
+                if (!validRequestIds.empty()) {
+                    std::uniform_int_distribution<> requestDist(0, validRequestIds.size() - 1);
+                    int selectedRequestIdx = requestDist(gen);
+                    int selectedRequestId = validRequestIds[selectedRequestIdx];
 
-                    if (std::find(requestsToRemove.begin(), requestsToRemove.end(), req_id) == requestsToRemove.end()) {
+                    // Store original route
+                    Route originalRoute = route;
 
-                        // Store original route state
-                        Route originalRoute = route;
+                    // Remove the selected request
+                    removeStopsByRequestId(route, selectedRequestId);
 
-                        // Try to remove the request
-                        while (true) {
-                            auto it = std::find_if(route.stops.begin(), route.stops.end(),
-                                                   [req_id](const Stop &stop) {
-                                                       return stop.request_id == req_id;
-                                                   });
-                            if (it != route.stops.end())
-                                route.stops.erase(it);
-                            else
-                                break;
-                        }
+                    // Update trailer operations
+                    updateTrailerOperations(route);
 
-                        // Update trailer operations
-                        updateTrailerOperations(route);
-
-                        // Validate the modified route
-                        if (!isRouteValid(route)) {
-                            // If invalid, restore original route
-                            route = originalRoute;
-                            continue; // Try another random selection
-                        }
-
-                        // Valid removal - add to removal list
-                        requestsToRemove.push_back(req_id);
+                    // Validate modified route
+                    if (!isRouteValid(route)) {
+                        route = originalRoute;
+                        continue;
                     }
+
+                    requestsToRemove.push_back(selectedRequestId);
                 }
             }
         }
     }
 
-    // Add a helper function to find request by ID
     const Request &findRequestById(int request_id) const {
         auto it = std::find_if(requests.begin(), requests.end(),
                                [request_id](const Request &req) { return req.id == request_id; });
@@ -283,70 +444,77 @@ class PDPSolver {
         }
         return *it;
     }
+
     void insertRequests(const std::vector<int> &requestIds) {
-        for (int req_id : requestIds) {
+        // Tạo một bản sao để có thể sắp xếp ngẫu nhiên
+        std::vector<int> randomRequestIds = requestIds;
+
+        // Tạo random generator
+        std::random_device rd;
+        std::mt19937 gen(rd());
+
+        // Shuffle ngẫu nhiên danh sách request IDs
+        std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
+
+        // Sau đó xử lý từng request theo thứ tự ngẫu nhiên mới
+        for (int req_id : randomRequestIds) {
             const Request &req = findRequestById(req_id);
             ll bestCost = std::numeric_limits<ll>::max();
             int bestRoute = -1;
-            Route newBestRoute;
-
-            Stop pickup = {
-                req_id,
-                req.size,
-                req.pickup_point,
-                req.pickup_action,
-                req.pickup_duration};
-
-            Stop delivery = {
-                req_id,
-                req.size,
-                req.drop_point,
-                req.drop_action,
-                req.drop_duration};
-
-            Stop drop_trailer = {
-                req_id,
-                NONE,
-                trailer_point,
-                DROP_TRAILER,
-                trailer_pickup_time};
-
-            Stop pickup_trailer = {
-                req_id,
-                NONE,
-                trailer_point,
-                PICKUP_TRAILER,
-                trailer_pickup_time};
+            Route bestRouteConfig;
 
             for (size_t routeIdx = 0; routeIdx < currentSolution.size(); routeIdx++) {
                 Route &route = currentSolution[routeIdx];
+                size_t routeSize = route.size();
 
-                for (size_t pickup_pos = 0; pickup_pos <= route.stops.size(); pickup_pos++) {
-                    for (size_t delivery_pos = pickup_pos; delivery_pos <= route.stops.size(); delivery_pos++) {
-                        route.stops.insert(route.stops.begin() + pickup_pos, pickup);
-                        route.stops.insert(route.stops.begin() + delivery_pos + 1, delivery);
+                for (size_t pickup_pos = 0; pickup_pos <= routeSize; pickup_pos++) {
+                    for (size_t delivery_pos = pickup_pos; delivery_pos <= routeSize; delivery_pos++) {
+                        // Try regular container operations
+                        {
+                            Route testRoute = route;
 
-                        Route testRoute = route;
-                        updateTrailerOperations(testRoute);
+                            // Insert pickup and delivery
+                            insertStop(testRoute,
+                                       StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
+                                       pickup_pos);
+                            insertStop(testRoute,
+                                       StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
+                                       delivery_pos + 1);
 
-                        if (isRouteValid(testRoute)) {
-                            ll newCost = calculateRouteCost(testRoute);
-                            if (newCost < bestCost) {
-                                bestCost = newCost;
-                                bestRoute = routeIdx;
-                                newBestRoute = testRoute;
+                            updateTrailerOperations(testRoute);
+
+                            if (isRouteValid(testRoute)) {
+                                ll newCost = calculateRouteCost(testRoute);
+                                if (newCost < bestCost) {
+                                    bestCost = newCost;
+                                    bestRoute = routeIdx;
+                                    bestRouteConfig = testRoute;
+                                }
                             }
                         }
 
-                        route.stops.erase(route.stops.begin() + delivery_pos + 1);
-                        route.stops.erase(route.stops.begin() + pickup_pos);
+                        // Try container with trailer operations if applicable
+                        {
+                            Route testRoute = route;
 
-                        if (req.pickup_action == PICKUP_CONTAINER_TRAILER) {
-                            route.stops.insert(route.stops.begin() + pickup_pos, drop_trailer);
-                            route.stops.insert(route.stops.begin() + pickup_pos + 1, pickup);
-                            route.stops.insert(route.stops.begin() + delivery_pos + 2, delivery);
+                            // Add trailer operations
+                            if (req.pickup_action == PICKUP_CONTAINER_TRAILER) {
+                                insertStop(testRoute,
+                                           StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time),
+                                           pickup_pos);
+                            } else {
+                                insertStop(testRoute,
+                                           StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time),
+                                           pickup_pos);
+                            }
 
-                            testRoute = route;
+                            insertStop(testRoute,
+                                       StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
+                                       pickup_pos + 1);
+                            insertStop(testRoute,
+                                       StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
+                                       delivery_pos + 2);
+
                             updateTrailerOperations(testRoute);
 
                             if (isRouteValid(testRoute)) {
@@ -354,41 +522,16 @@ class PDPSolver {
                                 if (newCost < bestCost) {
                                     bestCost = newCost;
                                     bestRoute = routeIdx;
-                                    newBestRoute = testRoute;
+                                    bestRouteConfig = testRoute;
                                 }
                             }
-
-                            route.stops.erase(route.stops.begin() + delivery_pos + 2);
-                            route.stops.erase(route.stops.begin() + pickup_pos + 1);
-                            route.stops.erase(route.stops.begin() + pickup_pos);
-                        } else {
-                            route.stops.insert(route.stops.begin() + pickup_pos, pickup_trailer);
-                            route.stops.insert(route.stops.begin() + pickup_pos + 1, pickup);
-                            route.stops.insert(route.stops.begin() + delivery_pos + 2, delivery);
-
-                            testRoute = route;
-                            updateTrailerOperations(testRoute);
-
-                            if (isRouteValid(testRoute)) {
-                                ll newCost = calculateRouteCost(testRoute);
-                                if (newCost < bestCost) {
-                                    bestCost = newCost;
-                                    bestRoute = routeIdx;
-                                    newBestRoute = testRoute;
-                                }
-                            }
-
-                            route.stops.erase(route.stops.begin() + delivery_pos + 2);
-                            route.stops.erase(route.stops.begin() + pickup_pos + 1);
-                            route.stops.erase(route.stops.begin() + pickup_pos);
                         }
                     }
                 }
             }
 
             if (bestRoute != -1) {
-                currentSolution[bestRoute] = newBestRoute;
-                updateTrailerOperations(currentSolution[bestRoute]);
+                currentSolution[bestRoute] = bestRouteConfig;
                 currentSolution[bestRoute].cost = calculateRouteCost(currentSolution[bestRoute]);
             }
         }
@@ -414,7 +557,6 @@ class PDPSolver {
         return alpha * calculateF1() + calculateF2();
     }
 
-  public:
     PDPSolver(const std::vector<Request> &requests,
               const std::vector<std::vector<ll>> &distances,
               const std::vector<int> &vehicle_depots,
@@ -440,9 +582,10 @@ class PDPSolver {
     }
 
     void solve() {
+        // Initialize unassigned requests
         std::vector<int> unassignedRequests;
         for (const Request &req : requests) {
-            unassignedRequests.push_back(req.id); // Use the actual request ID
+            unassignedRequests.push_back(req.id);
         }
         insertRequests(unassignedRequests);
 
@@ -452,16 +595,14 @@ class PDPSolver {
         ll bestSolutionCost = currentSolutionCost;
 
         for (int iter = 0; iter < max_iterations; iter++) {
-            if (verbose)
-                if (iter % 1 == 0) {
-                    std::cout << "Iter: " << iter << " Cost: " << bestSolutionCost << std::endl;
-                }
+
             int numToRemove = std::max(2, std::min(40,
                                                    static_cast<int>(0.1 + (0.3 * (std::rand() % 100) / 100.0) * requests.size())));
 
             std::vector<int> removedRequests;
             removeRandomRequests(removedRequests, numToRemove);
             insertRequests(removedRequests);
+
             ll newSolutionCost = calculateSolutionCost();
 
             if (newSolutionCost < bestSolutionCost) {
@@ -479,6 +620,9 @@ class PDPSolver {
             }
 
             currentTemp *= coolingRate;
+            if (verbose && iter % 1 == 0) {
+                std::cout << "Iter: " << iter << " Cost: " << bestSolutionCost << std::endl;
+            }
         }
 
         currentSolution = bestSolution;
@@ -499,7 +643,9 @@ struct IO {
     int max_iterations;
     bool verbose;
 
-    IO(int alpha, int max_iterations, bool verbose = false) : alpha(alpha), max_iterations(max_iterations), verbose(verbose) {}
+    IO(int alpha, int max_iterations, bool verbose = false)
+        : alpha(alpha), max_iterations(max_iterations), verbose(verbose) {}
+
     IO() {}
 
     Action getAction(std::string action) {
@@ -513,9 +659,7 @@ struct IO {
     }
 
     ContainerSize getContaierSize(int size) {
-        if (size == 20)
-            return TWENTY_FT;
-        return FORTY_FT;
+        return size == 20 ? TWENTY_FT : FORTY_FT;
     }
 
     void input() {
@@ -529,11 +673,10 @@ struct IO {
             distances[i].resize(N + 1);
         for (int i = 0; i < N * N; i++) {
             int src, dst;
-            std::cin >> src >> dst >> distances[src][dst]; // Convert to 0-based for array storage
+            std::cin >> src >> dst >> distances[src][dst];
         }
 
         std::cin >> dummy_str >> trailer_point >> trailer_pickup_time;
-        // No need to adjust trailer_point anymore as we keep it 1-based
 
         int num_vehicles;
         std::cin >> dummy_str >> num_vehicles;
@@ -541,7 +684,7 @@ struct IO {
         for (int i = 0; i < num_vehicles; i++) {
             int truck_id, truck_point;
             std::cin >> truck_id >> truck_point;
-            vehicle_depots[truck_id - 1] = truck_point; // Store depot as 1-based
+            vehicle_depots[truck_id - 1] = truck_point;
         }
 
         while (true) {
@@ -552,6 +695,7 @@ struct IO {
             int id, size, pickup_point, drop_point, pickup_duration, drop_duration;
             std::string pickup_action, drop_action;
             std::cin >> id >> size >> pickup_point >> pickup_action >> pickup_duration >> drop_point >> drop_action >> drop_duration;
+
             Request request = {
                 id,
                 getContaierSize(size),
@@ -566,29 +710,33 @@ struct IO {
     }
 
     void output_route(const Route &route) {
-        for (const Stop &stop : route.stops) {
-            std::cout << stop.point << " " << actions[stop.action];
-            if (stop.action == PICKUP_CONTAINER || stop.action == PICKUP_CONTAINER_TRAILER ||
-                stop.action == DROP_CONTAINER || stop.action == DROP_CONTAINER_TRAILER) {
-                std::cout << " " << stop.request_id; // Convert to 0-based for array access
+        PDPSolver solver(requests, distances, vehicle_depots, alpha, trailer_point,
+                         trailer_pickup_time, max_iterations, verbose);
+        StopNode *curr = route.stops;
+        while (curr != nullptr) {
+            std::cout << curr->point << " " << actions[curr->action];
+            if (curr->action == PICKUP_CONTAINER || curr->action == PICKUP_CONTAINER_TRAILER ||
+                curr->action == DROP_CONTAINER || curr->action == DROP_CONTAINER_TRAILER) {
+                std::cout << " " << curr->request_id;
             }
             std::cout << std::endl;
+            curr = curr->next;
         }
-        std::cout << route.depot << " " << "STOP" << std::endl;
+        std::cout << route.depot << " STOP" << std::endl;
         std::cout << "#" << std::endl;
     }
 
     void output() {
-        PDPSolver solver(requests, distances, vehicle_depots, alpha, trailer_point, trailer_pickup_time, max_iterations, verbose);
+        PDPSolver solver(requests, distances, vehicle_depots, alpha, trailer_point,
+                         trailer_pickup_time, max_iterations, verbose);
         solver.solve();
         std::vector<Route> solution = solver.getSolution();
 
-        // freopen("tc/6/out.txt", "w", stdout);
+        freopen("tc/6/out.txt", "w", stdout);
         std::cout << "ROUTES " << solution.size() << std::endl;
         for (size_t i = 0; i < solution.size(); i++) {
-            const Route &route = solution[i];
             std::cout << "TRUCK " << i + 1 << std::endl;
-            output_route(route);
+            output_route(solution[i]);
         }
     }
 };
@@ -597,9 +745,11 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    // freopen("tc/6/inp.txt", "r", stdin);
-    IO io(1000, 20, false);
+    freopen("tc/6/inp.txt", "r", stdin);
+
+    IO io(100000, 20, 1);
     io.input();
     io.output();
+
     return 0;
 }
