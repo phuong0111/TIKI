@@ -152,13 +152,18 @@ class PDPSolver {
     std::vector<Route> currentSolution;
     std::random_device rd;
     std::mt19937 gen;
-    int alpha = 100000;
+    int alpha;
     int trailer_point;
     int trailer_pickup_time;
     int max_iterations;
     bool verbose;
+
     const double temperature = 100.0;
     const double coolingRate = 0.9995;
+    int noImprovementCount = 0;
+    const int maxNoImprovement = 100;
+    const double destroyRateMin = 0.1;
+    const double destroyRateMax = 0.4;
 
   public:
     // Helper function to add a stop to the end of route
@@ -389,6 +394,28 @@ class PDPSolver {
         route.cost = calculateRouteCost(newRoute);
     }
 
+    // Add function to calculate adaptive destroy rate
+    int calculateDestroySize(int currentIter) {
+        // Increase destroy rate if no improvement for a while
+        double progressRatio = static_cast<double>(currentIter) / max_iterations;
+        double noImprovementRatio = static_cast<double>(noImprovementCount) / maxNoImprovement;
+
+        // Calculate base rate that increases with no improvement and varies with progress
+        double baseRate = destroyRateMin +
+                          (destroyRateMax - destroyRateMin) * (0.5 * noImprovementRatio + 0.5 * std::sin(progressRatio * M_PI));
+
+        // Adjust based on problem size
+        int minRemove = std::max(2, static_cast<int>(0.05 * requests.size()));
+        int maxRemove = std::min(static_cast<int>(requests.size()),
+                                 static_cast<int>(0.5 * requests.size()));
+
+        // Calculate actual number to remove
+        int numToRemove = static_cast<int>(baseRate * requests.size());
+
+        // Ensure within bounds
+        return std::clamp(numToRemove, minRemove, maxRemove);
+    }
+
     void removeRandomRequests(std::vector<int> &requestsToRemove, int count) {
         std::uniform_int_distribution<> routeDist(0, currentSolution.size() - 1);
         int max_attemp = 20;
@@ -593,11 +620,12 @@ class PDPSolver {
         ll currentSolutionCost = calculateSolutionCost();
         auto bestSolution = currentSolution;
         ll bestSolutionCost = currentSolutionCost;
+        ll lastBestCost = bestSolutionCost;
+        noImprovementCount = 0;
 
         for (int iter = 0; iter < max_iterations; iter++) {
-
-            int numToRemove = std::max(2, std::min(40,
-                                                   static_cast<int>(0.1 + (0.3 * (std::rand() % 100) / 100.0) * requests.size())));
+            // Calculate adaptive destroy size
+            int numToRemove = calculateDestroySize(iter);
 
             std::vector<int> removedRequests;
             removeRandomRequests(removedRequests, numToRemove);
@@ -609,6 +637,7 @@ class PDPSolver {
                 bestSolution = currentSolution;
                 bestSolutionCost = newSolutionCost;
                 currentSolutionCost = newSolutionCost;
+                noImprovementCount = 0; // Reset counter on improvement
             } else {
                 double acceptanceProbability = exp((currentSolutionCost - newSolutionCost) / currentTemp);
                 std::uniform_real_distribution<> dist(0, 1);
@@ -617,11 +646,21 @@ class PDPSolver {
                 } else {
                     currentSolution = bestSolution;
                 }
+
+                // Update no improvement counter
+                if (bestSolutionCost >= lastBestCost) {
+                    noImprovementCount = std::min(noImprovementCount + 1, maxNoImprovement);
+                }
             }
 
+            lastBestCost = bestSolutionCost;
             currentTemp *= coolingRate;
+
             if (verbose && iter % 1 == 0) {
-                std::cout << "Iter: " << iter << " Cost: " << bestSolutionCost << std::endl;
+                std::cout << "Iter: " << iter
+                          << " Cost: " << bestSolutionCost
+                          << " Destroy: " << numToRemove
+                          << " NoImprove: " << noImprovementCount << std::endl;
             }
         }
 
