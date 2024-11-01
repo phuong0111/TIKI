@@ -92,9 +92,13 @@ def checkValidRouteAndCalculateScore(truck_id: int, routes: list[str]):
         completion_time += distances[prev_point][point]  # Total time includes travel
         
         # Add service times to completion time only (not to travel time)
-        if request_id:
-            service_time = requests[request_id][1] if "pickup" in action.lower() else requests[request_id][2]
-            completion_time += service_time
+        if action in [PICKUP_TRAILER, DROP_TRAILER]:
+            service_time = trailer_load_up_time
+        elif action == STOP:
+            service_time = 0
+        else:
+            service_time = requests[request_id][1] if action in [PICKUP_CONTAINER, PICKUP_CONTAINER_TRAILER] else requests[request_id][2]
+        completion_time += service_time
             
         prev_point = point
         
