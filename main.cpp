@@ -1,6 +1,36 @@
 #include <bits/stdc++.h>
 
+// Template function to measure execution time
+template<typename F, typename... Args>
+auto benchmark(F func, std::string func_name, Args&&... args) {
+    return [=](Args&&... args) {
+        // Start measuring time
+        auto start = std::chrono::high_resolution_clock::now();
+        
+        // Execute the function
+        auto result = func(std::forward<Args>(args)...);
+        
+        // Stop measuring time
+        auto end = std::chrono::high_resolution_clock::now();
+        
+        // Calculate duration in milliseconds
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        
+        // Print benchmark results
+        std::cout << "Function '" << func_name << "' executed in " 
+                  << duration.count() << " microseconds" << std::endl;
+        
+        return result;
+    };
+}
+
+// Macro to make the decorator easier to use
+#define BENCHMARK(func) benchmark(func, #func)
+
 typedef long int ll;
+
+const int MAX_POINT = 1001;
+const int MAX_VEHICLES = 501;
 
 enum Action {
     PICKUP_CONTAINER,
@@ -143,13 +173,14 @@ struct Route {
     }
 };
 
+std::array<std::array<ll, MAX_POINT>, MAX_POINT> distances;
+std::array<int, MAX_VEHICLES> vehicle_depots;
+std::array<Route, MAX_VEHICLES> currentSolution;
+
 class PDPSolver {
   private:
     std::vector<Request> requests;
-    std::vector<std::vector<ll>> distances;
-    std::vector<int> vehicle_depots;
-    int numVehicles;
-    std::vector<Route> currentSolution;
+    int num_vehicles;
     std::random_device rd;
     std::mt19937 gen;
     int alpha;
@@ -392,7 +423,7 @@ class PDPSolver {
     }
 
     void removeRandomRequests(std::vector<int> &requestsToRemove, int max_attempt) {
-        std::uniform_int_distribution<> routeDist(0, currentSolution.size() - 1);
+        std::uniform_int_distribution<> routeDist(0, num_vehicles - 1);
         int attempt = 0;
 
         while (attempt++ < max_attempt) {
@@ -464,7 +495,7 @@ class PDPSolver {
             int bestRoute = -1;
             Route bestRouteConfig;
 
-            for (size_t routeIdx = 0; routeIdx < currentSolution.size(); routeIdx++) {
+            for (size_t routeIdx = 0; routeIdx < num_vehicles; routeIdx++) {
                 Route &route = currentSolution[routeIdx];
                 size_t routeSize = route.size();
 
@@ -559,25 +590,21 @@ class PDPSolver {
     }
 
     PDPSolver(const std::vector<Request> &requests,
-              const std::vector<std::vector<ll>> &distances,
-              const std::vector<int> &vehicle_depots,
+              int num_vehicles,
               int alpha,
               int trailer_point,
               int trailer_pickup_time,
               int max_iterations,
               bool verbose)
         : requests(requests),
-          distances(distances),
-          vehicle_depots(vehicle_depots),
-          numVehicles(vehicle_depots.size()),
+          num_vehicles(num_vehicles),
           alpha(alpha),
           trailer_point(trailer_point),
           trailer_pickup_time(trailer_pickup_time),
           max_iterations(max_iterations),
           verbose(verbose),
           gen(rd()) {
-        currentSolution.resize(numVehicles);
-        for (int i = 0; i < numVehicles; i++) {
+        for (int i = 0; i < num_vehicles; i++) {
             currentSolution[i].depot = vehicle_depots[i];
         }
     }
@@ -629,15 +656,14 @@ class PDPSolver {
         currentSolution = bestSolution;
     }
 
-    std::vector<Route> getSolution() {
+    std::array<Route, MAX_VEHICLES> getSolution() {
         return currentSolution;
     }
 };
 
 struct IO {
     std::vector<Request> requests;
-    std::vector<std::vector<ll>> distances;
-    std::vector<int> vehicle_depots;
+    int num_vehicles;
     int trailer_point;
     int trailer_pickup_time;
     int alpha;
@@ -669,9 +695,6 @@ struct IO {
         std::cin >> dummy_str >> N;
         std::cin >> dummy_str >> dummy_num;
 
-        distances.resize(N + 1);
-        for (int i = 0; i < distances.size(); i++)
-            distances[i].resize(N + 1);
         for (int i = 0; i < N * N; i++) {
             int src, dst;
             std::cin >> src >> dst >> distances[src][dst];
@@ -679,9 +702,7 @@ struct IO {
 
         std::cin >> dummy_str >> trailer_point >> trailer_pickup_time;
 
-        int num_vehicles;
         std::cin >> dummy_str >> num_vehicles;
-        vehicle_depots.resize(num_vehicles);
         for (int i = 0; i < num_vehicles; i++) {
             int truck_id, truck_point;
             std::cin >> truck_id >> truck_point;
@@ -711,8 +732,6 @@ struct IO {
     }
 
     void output_route(const Route &route) {
-        PDPSolver solver(requests, distances, vehicle_depots, alpha, trailer_point,
-                         trailer_pickup_time, max_iterations, verbose);
         StopNode *curr = route.stops;
         while (curr != nullptr) {
             std::cout << curr->point << " " << actions[curr->action];
@@ -728,14 +747,15 @@ struct IO {
     }
 
     void output() {
-        PDPSolver solver(requests, distances, vehicle_depots, alpha, trailer_point,
+        PDPSolver solver(requests, num_vehicles, alpha, trailer_point,
                          trailer_pickup_time, max_iterations, verbose);
+        
         solver.solve();
-        std::vector<Route> solution = solver.getSolution();
+        std::array<Route, MAX_VEHICLES> solution = solver.getSolution();
 
         freopen("tc/6/out.txt", "w", stdout);
-        std::cout << "ROUTES " << solution.size() << std::endl;
-        for (size_t i = 0; i < solution.size(); i++) {
+        std::cout << "ROUTES " << num_vehicles << std::endl;
+        for (size_t i = 0; i < num_vehicles; i++) {
             std::cout << "TRUCK " << i + 1 << std::endl;
             output_route(solution[i]);
         }
