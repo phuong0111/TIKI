@@ -1,7 +1,7 @@
 import sys
 
 # input
-with open("tc/4/inp.txt") as f:
+with open("tc/6/inp.txt") as f:
     sys.stdin = f
     # request = {id: (size, pickup_duration, drop_duration)}
     requests: dict[int, tuple[int, int, int]] = {}
@@ -88,7 +88,6 @@ def checkValidRouteAndCalculateScore(truck_id: int, routes: list[str]):
                 return False, f"Truck {truck_id} at point {point} has container, can not do action {action}", 0, 0
 
         # Update times
-        travel_time += distances[prev_point][point]  # Only travel time for F2
         completion_time += distances[prev_point][point]  # Total time includes travel
         
         # Add service times to completion time only (not to travel time)
@@ -105,12 +104,11 @@ def checkValidRouteAndCalculateScore(truck_id: int, routes: list[str]):
     return True, "Correct answer", completion_time, travel_time
 
 # output
-with open("tc/4/out.txt") as f:
+with open("tc/6/out.txt") as f:
     sys.stdin = f
     _ = int(input().split()[-1]) 
     assert _ == num_of_routes
     completion_times = []  # For F1
-    travel_times = []     # For F2
     
     check = True
     message = ""
@@ -130,11 +128,10 @@ with open("tc/4/out.txt") as f:
             break
             
         completion_times.append(completion_time)
-        travel_times.append(travel_time)
             
     if check:
         F1 = max(completion_times)  # Maximum completion time
-        F2 = sum(travel_times)      # Total travel time
+        F2 = sum(completion_times)      # Total travel time
         F = alpha * F1 + F2         # Combined objective
         
         print(f"F1 (Max completion time) = {F1}")
