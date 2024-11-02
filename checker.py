@@ -1,7 +1,7 @@
 import sys
 
 # input
-with open("tc/7/inp.txt") as f:
+with open("tc/6/inp.txt") as f:
     sys.stdin = f
     # request = {id: (size, pickup_duration, drop_duration)}
     requests: dict[int, tuple[int, int, int]] = {}
@@ -104,7 +104,7 @@ def checkValidRouteAndCalculateScore(truck_id: int, routes: list[str]):
     return True, "Correct answer", completion_time, travel_time
 
 # output
-with open("tc/7/out.txt") as f:
+with open("tc/6/out.txt") as f:
     sys.stdin = f
     _ = int(input().split()[-1]) 
     assert _ == num_of_routes
@@ -128,7 +128,9 @@ with open("tc/7/out.txt") as f:
             break
             
         completion_times.append(completion_time)
-            
+        
+with open("tc/6/result.txt") as f:
+    sys.stdin = f
     if check:
         F1 = max(completion_times)  # Maximum completion time
         F2 = sum(completion_times)      # Total travel time
