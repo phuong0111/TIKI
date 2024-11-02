@@ -1,32 +1,5 @@
 #include <bits/stdc++.h>
 
-// Template function to measure execution time
-template<typename F, typename... Args>
-auto benchmark(F func, std::string func_name, Args&&... args) {
-    return [=](Args&&... args) {
-        // Start measuring time
-        auto start = std::chrono::high_resolution_clock::now();
-        
-        // Execute the function
-        auto result = func(std::forward<Args>(args)...);
-        
-        // Stop measuring time
-        auto end = std::chrono::high_resolution_clock::now();
-        
-        // Calculate duration in milliseconds
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-        
-        // Print benchmark results
-        std::cout << "Function '" << func_name << "' executed in " 
-                  << duration.count() << " microseconds" << std::endl;
-        
-        return result;
-    };
-}
-
-// Macro to make the decorator easier to use
-#define BENCHMARK(func) benchmark(func, #func)
-
 typedef long int ll;
 
 const int MAX_POINT = 1001;
@@ -478,6 +451,7 @@ class PDPSolver {
     }
 
     void insertRequests(const std::vector<int> &requestIds) {
+        auto start = std::chrono::high_resolution_clock::now();
         // Tạo một bản sao để có thể sắp xếp ngẫu nhiên
         std::vector<int> randomRequestIds = requestIds;
 
@@ -567,6 +541,9 @@ class PDPSolver {
                 currentSolution[bestRoute].cost = calculateRouteCost(currentSolution[bestRoute]);
             }
         }
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "time taken: " << duration.count() << " milliseconds" << std::endl;
     }
 
     ll calculateF1() {
@@ -615,7 +592,11 @@ class PDPSolver {
         for (const Request &req : requests) {
             unassignedRequests.push_back(req.id);
         }
+        std::cout << "Initialize: ";
         insertRequests(unassignedRequests);
+
+        // auto timer = make_timer(insertRequests);
+        // timer(unassignedRequests);
 
         ll currentTemp = temperature;
         ll currentSolutionCost = calculateSolutionCost();
@@ -626,6 +607,7 @@ class PDPSolver {
         for (int iter = 0; iter < max_iterations; iter++) {
             std::vector<int> removedRequests;
             removeRandomRequests(removedRequests, max_attempt);
+            std::cout << "Iter: " << iter + 1 << " ";
             insertRequests(removedRequests);
 
             ll newSolutionCost = calculateSolutionCost();
