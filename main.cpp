@@ -267,30 +267,52 @@ class PDPSolver {
         after->next = newNode;
     }
 
-    // Helper function to remove a stop from specific position
-    void removeStop(Route &route, int position) {
-        if (route.stops == nullptr)
-            return;
+    void removeStopAfter(Route &route, StopNode *after) {
+        if (route.stops == nullptr) return;
 
-        if (position == 0) {
+        // If after is nullptr, remove first stop
+        if (after == nullptr) {
             StopNode *temp = route.stops;
+            
+            // Update costs
+            route.cost -= temp->duration; // Remove stop duration
+            if (temp->next != nullptr) {
+                route.cost -= getDistance(route.depot, temp->point);       // Remove depot->removed
+                route.cost -= getDistance(temp->point, temp->next->point); // Remove removed->next
+                route.cost += getDistance(route.depot, temp->next->point); // Add depot->new first
+            } else {
+                // If this was the only stop
+                route.cost -= getDistance(route.depot, temp->point);
+                route.cost -= getDistance(temp->point, route.depot);
+            }
+
             route.stops = route.stops->next;
             delete temp;
             return;
         }
 
-        StopNode *curr = route.stops;
-        int currentPos = 0;
-        while (curr != nullptr && currentPos < position - 1) {
-            curr = curr->next;
-            currentPos++;
+        // If trying to remove after the last node
+        if (after->next == nullptr) return;
+
+        StopNode *temp = after->next;
+        
+        // Update costs
+        route.cost -= temp->duration; // Remove stop duration
+
+        if (temp->next != nullptr) {
+            // Removing from middle
+            route.cost -= getDistance(after->point, temp->point);       // Remove prev->removed
+            route.cost -= getDistance(temp->point, temp->next->point);  // Remove removed->next
+            route.cost += getDistance(after->point, temp->next->point); // Add prev->next
+        } else {
+            // Removing last stop
+            route.cost -= getDistance(after->point, temp->point);   // Remove prev->removed
+            route.cost -= getDistance(temp->point, route.depot);    // Remove removed->depot
+            route.cost += getDistance(after->point, route.depot);   // Add new last->depot
         }
 
-        if (curr != nullptr && curr->next != nullptr) {
-            StopNode *temp = curr->next;
-            curr->next = curr->next->next;
-            delete temp;
-        }
+        after->next = temp->next;
+        delete temp;
     }
 
     // Helper function to remove stops by request ID
@@ -531,108 +553,18 @@ class PDPSolver {
         return *it;
     }
 
-    // void insertRequests(const std::vector<int> &requestIds) {
-    //     auto start = std::chrono::high_resolution_clock::now();
-    //     // Tạo một bản sao để có thể sắp xếp ngẫu nhiên
-    //     std::vector<int> randomRequestIds = requestIds;
-
-    //     // Tạo random generator
-    //     std::random_device rd;
-    //     std::mt19937 gen(rd());
-
-    //     // Shuffle ngẫu nhiên danh sách request IDs
-    //     std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
-
-    //     // Sau đó xử lý từng request theo thứ tự ngẫu nhiên mới
-    //     for (int req_id : randomRequestIds) {
-    //         const Request &req = findRequestById(req_id);
-    //         ll bestCost = std::numeric_limits<ll>::max();
-    //         int bestRoute = -1;
-    //         Route bestRouteConfig;
-
-    //         for (size_t routeIdx = 0; routeIdx < num_vehicles; routeIdx++) {
-    //             Route &route = currentSolution[routeIdx];
-    //             size_t routeSize = route.size();
-
-    //             for (size_t pickup_pos = 0; pickup_pos <= routeSize; pickup_pos++) {
-    //                 for (size_t delivery_pos = pickup_pos; delivery_pos <= routeSize; delivery_pos++) {
-    //                     // Try regular container operations
-    //                     {
-    //                         Route testRoute = route;
-
-    //                         // Insert pickup and delivery
-    //                         insertStop(testRoute,
-    //                                    StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
-    //                                    pickup_pos);
-    //                         insertStop(testRoute,
-    //                                    StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
-    //                                    delivery_pos + 1);
-
-    //                         updateTrailerOperations(testRoute);
-
-    //                         if (isRouteValid(testRoute)) {
-    //                             ll newCost = testRoute.cost;
-    //                             if (newCost < bestCost) {
-    //                                 bestCost = newCost;
-    //                                 bestRoute = routeIdx;
-    //                                 bestRouteConfig = testRoute;
-    //                             }
-    //                         }
-    //                     }
-
-    //                     // Try container with trailer operations if applicable
-    //                     {
-    //                         Route testRoute = route;
-
-    //                         // Add trailer operations
-    //                         if (req.pickup_action == PICKUP_CONTAINER_TRAILER) {
-    //                             insertStop(testRoute,
-    //                                        StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time),
-    //                                        pickup_pos);
-    //                         } else {
-    //                             insertStop(testRoute,
-    //                                        StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time),
-    //                                        pickup_pos);
-    //                         }
-
-    //                         insertStop(testRoute,
-    //                                    StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
-    //                                    pickup_pos + 1);
-    //                         insertStop(testRoute,
-    //                                    StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
-    //                                    delivery_pos + 2);
-
-    //                         updateTrailerOperations(testRoute);
-
-    //                         if (isRouteValid(testRoute)) {
-    //                             ll newCost = testRoute.cost;
-    //                             if (newCost < bestCost) {
-    //                                 bestCost = newCost;
-    //                                 bestRoute = routeIdx;
-    //                                 bestRouteConfig = testRoute;
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-
-    //         if (bestRoute != -1) {
-    //             currentSolution[bestRoute] = bestRouteConfig;
-    //             currentSolution[bestRoute].cost = calculateRouteCost(currentSolution[bestRoute]);
-    //         }
-    //     }
-    //     auto end = std::chrono::high_resolution_clock::now();
-    //     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    //     std::cout << "time taken: " << duration.count() << " milliseconds" << std::endl;
-    // }
-
     void insertRequests(const std::vector<int> &requestIds) {
-        // auto start = std::chrono::high_resolution_clock::now();
-        // Create a copy for random shuffling
+        // Tạo một bản sao để có thể sắp xếp ngẫu nhiên
         std::vector<int> randomRequestIds = requestIds;
-        std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
 
+        // Tạo random generator
+        std::random_device rd;
+        std::mt19937 gen(rd());
+
+        // Shuffle ngẫu nhiên danh sách request IDs
+        // std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
+
+        // Sau đó xử lý từng request theo thứ tự ngẫu nhiên mới
         for (int req_id : randomRequestIds) {
             const Request &req = findRequestById(req_id);
             ll bestCost = std::numeric_limits<ll>::max();
@@ -641,75 +573,23 @@ class PDPSolver {
 
             for (size_t routeIdx = 0; routeIdx < num_vehicles; routeIdx++) {
                 Route &route = currentSolution[routeIdx];
+                size_t routeSize = route.size();
 
-                // Handle empty route case first
-                {
-                    // Try with regular container operations
-                    Route testRoute = route;
-                    StopNode *lastInserted = nullptr;
-
-                    // Insert pickup and delivery
-                    insertStopAfter(testRoute,
-                                    StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
-                                    nullptr); // Insert at start
-
-                    insertStopAfter(testRoute,
-                                    StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
-                                    testRoute.stops); // Insert after first node
-
-                    updateTrailerOperations(testRoute);
-
-                    if (isRouteValid(testRoute)) {
-                        ll newCost = testRoute.cost;
-                        if (newCost < bestCost) {
-                            bestCost = newCost;
-                            bestRoute = routeIdx;
-                            bestRouteConfig = testRoute;
-                        }
-                    }
-                }
-
-                // Try all other positions
-                StopNode *curr = route.stops;
-                StopNode *prev = nullptr;
-
-                while (curr != nullptr || prev != nullptr) { // Include the case to insert after last node
-                    for (StopNode *delivery_point = curr; delivery_point != nullptr || delivery_point == nullptr; delivery_point = delivery_point ? delivery_point->next : nullptr) {
+                StopNode *pickup_ptr = nullptr;
+                for (size_t pickup_pos = 0; pickup_pos <= routeSize; pickup_pos++) {
+                    StopNode *delivery_ptr = pickup_ptr;
+                    for (size_t delivery_pos = pickup_pos; delivery_pos <= routeSize; delivery_pos++) {
                         // Try regular container operations
                         {
                             Route testRoute = route;
-                            StopNode *lastInserted;
-
-                            // Find corresponding positions in testRoute
-                            StopNode *testPrev = nullptr;
-                            StopNode *testCurr = testRoute.stops;
-                            StopNode *testDelivery = testRoute.stops;
-
-                            // Navigate to pickup position
-                            while (testCurr != nullptr && curr != nullptr && testCurr->point != curr->point) {
-                                testPrev = testCurr;
-                                testCurr = testCurr->next;
-                            }
-
-                            // Navigate to delivery position
-                            while (testDelivery != nullptr && delivery_point != nullptr && testDelivery->point != delivery_point->point) {
-                                testDelivery = testDelivery->next;
-                            }
 
                             // Insert pickup and delivery
-                            insertStopAfter(testRoute,
-                                            StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
-                                            testPrev); // might be nullptr for start of route
-
-                            // Find newly inserted pickup node to insert delivery after it
-                            StopNode *afterPickup = (testPrev == nullptr) ? testRoute.stops : testPrev->next;
-                            while (afterPickup != nullptr && afterPickup->next != testCurr) {
-                                afterPickup = afterPickup->next;
-                            }
-
-                            insertStopAfter(testRoute,
-                                            StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
-                                            testDelivery ? testDelivery : afterPickup);
+                            insertStop(testRoute,
+                                       StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
+                                       pickup_pos);
+                            insertStop(testRoute,
+                                       StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
+                                       delivery_pos + 1);
 
                             updateTrailerOperations(testRoute);
 
@@ -723,52 +603,27 @@ class PDPSolver {
                             }
                         }
 
-                        // Try container with trailer operations
+                        // Try container with trailer operations if applicable
                         {
                             Route testRoute = route;
-                            StopNode *lastInserted;
-
-                            // Find corresponding positions in testRoute
-                            StopNode *testPrev = nullptr;
-                            StopNode *testCurr = testRoute.stops;
-                            StopNode *testDelivery = testRoute.stops;
-
-                            while (testCurr != nullptr && curr != nullptr && testCurr->point != curr->point) {
-                                testPrev = testCurr;
-                                testCurr = testCurr->next;
-                            }
-
-                            while (testDelivery != nullptr && delivery_point != nullptr && testDelivery->point != delivery_point->point) {
-                                testDelivery = testDelivery->next;
-                            }
 
                             // Add trailer operations
                             if (req.pickup_action == PICKUP_CONTAINER_TRAILER) {
-                                insertStopAfter(testRoute,
-                                                StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time),
-                                                testPrev);
+                                insertStop(testRoute,
+                                           StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time),
+                                           pickup_pos);
                             } else {
-                                insertStopAfter(testRoute,
-                                                StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time),
-                                                testPrev);
+                                insertStop(testRoute,
+                                           StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time),
+                                           pickup_pos);
                             }
 
-                            // Find position after trailer operation
-                            StopNode *afterTrailer = (testPrev == nullptr) ? testRoute.stops : testPrev->next;
-
-                            insertStopAfter(testRoute,
-                                            StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
-                                            afterTrailer);
-
-                            // Find position for delivery
-                            StopNode *afterPickup = afterTrailer->next;
-                            while (afterPickup != nullptr && afterPickup->next != testCurr) {
-                                afterPickup = afterPickup->next;
-                            }
-
-                            insertStopAfter(testRoute,
-                                            StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
-                                            testDelivery ? testDelivery : afterPickup);
+                            insertStop(testRoute,
+                                       StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
+                                       pickup_pos + 1);
+                            insertStop(testRoute,
+                                       StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
+                                       delivery_pos + 2);
 
                             updateTrailerOperations(testRoute);
 
@@ -782,11 +637,9 @@ class PDPSolver {
                             }
                         }
 
-                        if (delivery_point == nullptr)
-                            break; // For the last iteration
+                        delivery_ptr = (delivery_ptr == nullptr) ? route.stops : delivery_ptr->next;
                     }
-                    prev = curr;
-                    curr = curr ? curr->next : nullptr;
+                    pickup_ptr = (pickup_ptr == nullptr) ? route.stops : pickup_ptr->next;
                 }
             }
 
@@ -795,9 +648,6 @@ class PDPSolver {
                 currentSolution[bestRoute].cost = calculateRouteCost(currentSolution[bestRoute]);
             }
         }
-        // auto end = std::chrono::high_resolution_clock::now();
-        // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        // std::cout << "time taken: " << duration.count() << " milliseconds" << std::endl;
     }
 
     ll calculateF1() {
@@ -1001,7 +851,7 @@ int main() {
     std::cout.tie(NULL);
     freopen("tc/6/inp.txt", "r", stdin);
 
-    IO io(100000, 20, 1);
+    IO io(100000, 0, 1);
     io.input();
     io.output();
 
