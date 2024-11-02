@@ -334,26 +334,26 @@ class PDPSolver {
     }
 
     void updateTrailerOperations(Route &route) {
-        // Remove all existing trailer operations
-        StopNode *curr = route.stops;
-        StopNode *prev = nullptr;
+        // // Remove all existing trailer operations
+        // StopNode *curr = route.stops;
+        // StopNode *prev = nullptr;
 
-        while (curr != nullptr) {
-            if (curr->request_id == -1) {
-                if (prev == nullptr) {
-                    route.stops = curr->next;
-                    delete curr;
-                    curr = route.stops;
-                } else {
-                    prev->next = curr->next;
-                    delete curr;
-                    curr = prev->next;
-                }
-            } else {
-                prev = curr;
-                curr = curr->next;
-            }
-        }
+        // while (curr != nullptr) {
+        //     if (curr->request_id == -1) {
+        //         if (prev == nullptr) {
+        //             route.stops = curr->next;
+        //             delete curr;
+        //             curr = route.stops;
+        //         } else {
+        //             prev->next = curr->next;
+        //             delete curr;
+        //             curr = prev->next;
+        //         }
+        //     } else {
+        //         prev = curr;
+        //         curr = curr->next;
+        //     }
+        // }
 
         if (route.stops == nullptr)
             return;
@@ -361,14 +361,15 @@ class PDPSolver {
         bool current_has_trailer = false;
         Route newRoute(route.depot);
 
-        // Add trailer pickup if needed for first stop
-        if (route.stops->action == PICKUP_CONTAINER) {
-            addStop(newRoute, StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time));
-            current_has_trailer = true;
-        }
+        // // Add trailer pickup if needed for first stop
+        // if (route.stops->action == PICKUP_CONTAINER) {
+        //     addStop(newRoute, StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time));
+        //     current_has_trailer = true;
+        // }
 
         // Process all stops
-        curr = route.stops;
+        // curr = route.stops;
+        StopNode *curr = route.stops;
         while (curr != nullptr) {
             if (!current_has_trailer && curr->action == PICKUP_CONTAINER) {
                 addStop(newRoute, StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time));
@@ -377,9 +378,9 @@ class PDPSolver {
 
             addStop(newRoute, *curr);
 
-            if (curr->action == PICKUP_CONTAINER_TRAILER) {
+            if (curr->action == PICKUP_CONTAINER_TRAILER || curr->action == PICKUP_TRAILER) {
                 current_has_trailer = true;
-            } else if (curr->action == DROP_CONTAINER_TRAILER) {
+            } else if (curr->action == DROP_CONTAINER_TRAILER || curr->action == DROP_TRAILER) {
                 current_has_trailer = false;
             }
 
@@ -735,7 +736,7 @@ struct IO {
         solver.solve();
         std::array<Route, MAX_VEHICLES> solution = solver.getSolution();
 
-        freopen("tc/6/out.txt", "w", stdout);
+        freopen("tc/7/out.txt", "w", stdout);
         std::cout << "ROUTES " << num_vehicles << std::endl;
         for (size_t i = 0; i < num_vehicles; i++) {
             std::cout << "TRUCK " << i + 1 << std::endl;
@@ -748,7 +749,7 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    freopen("tc/6/inp.txt", "r", stdin);
+    freopen("tc/7/inp.txt", "r", stdin);
 
     IO io(100000, 20, 1);
     io.input();

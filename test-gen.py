@@ -12,7 +12,7 @@ PICKUP_TRAILER = "PICKUP_TRAILER"
 DROP_TRAILER = "DROP_TRAILER"
 STOP = "STOP"
 
-distance_range = (1, 10)
+distance_range = (10, 100)
 operation_range = (1, 10)
 
 def get_rand(range: tuple[int, int]) -> int:
@@ -45,6 +45,6 @@ def gen(num_point: int, num_vehicles: int, num_requests: int):
 
 with open(PATH, "w") as fw:
     sys.stdout = fw
-    gen(10, 10, 10)
+    gen(200, 40, 400)
     
     
