@@ -334,41 +334,12 @@ class PDPSolver {
     }
 
     void updateTrailerOperations(Route &route) {
-        // // Remove all existing trailer operations
-        // StopNode *curr = route.stops;
-        // StopNode *prev = nullptr;
-
-        // while (curr != nullptr) {
-        //     if (curr->request_id == -1) {
-        //         if (prev == nullptr) {
-        //             route.stops = curr->next;
-        //             delete curr;
-        //             curr = route.stops;
-        //         } else {
-        //             prev->next = curr->next;
-        //             delete curr;
-        //             curr = prev->next;
-        //         }
-        //     } else {
-        //         prev = curr;
-        //         curr = curr->next;
-        //     }
-        // }
-
         if (route.stops == nullptr)
             return;
 
         bool current_has_trailer = false;
         Route newRoute(route.depot);
 
-        // // Add trailer pickup if needed for first stop
-        // if (route.stops->action == PICKUP_CONTAINER) {
-        //     addStop(newRoute, StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time));
-        //     current_has_trailer = true;
-        // }
-
-        // Process all stops
-        // curr = route.stops;
         StopNode *curr = route.stops;
         while (curr != nullptr) {
             if (!current_has_trailer && curr->action == PICKUP_CONTAINER) {
