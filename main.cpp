@@ -579,11 +579,14 @@ class PDPSolver {
 
                 StopNode *pickup_ptr = nullptr;
                 for (size_t pickup_pos = 0; pickup_pos <= routeSize; pickup_pos++) {
+                    // Added optimization: Skip invalid container size combinations
                     if (pickup_ptr != nullptr && (pickup_ptr->action == PICKUP_CONTAINER || pickup_ptr->action == PICKUP_CONTAINER_TRAILER) && (req.size == FORTY_FT || pickup_ptr->size == FORTY_FT)) {
                         pickup_ptr = (pickup_ptr == nullptr) ? route.stops : pickup_ptr->next;
                         continue;
                     }
+                    StopNode *drop_ptr = pickup_ptr;
                     for (size_t delivery_pos = pickup_pos; delivery_pos <= ((req.size == TWENTY_FT) ? routeSize : pickup_pos); delivery_pos++) {
+                        std::cout << delivery_pos << std::endl;
                         // Try regular container operations
                         {
                             Route testRoute = route;
@@ -641,6 +644,7 @@ class PDPSolver {
                                 }
                             }
                         }
+                        drop_ptr = (drop_ptr == nullptr) ? route.stops : drop_ptr->next;
                     }
                     pickup_ptr = (pickup_ptr == nullptr) ? route.stops : pickup_ptr->next;
                 }
