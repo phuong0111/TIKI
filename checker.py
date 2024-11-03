@@ -129,8 +129,6 @@ with open("tc/6/out.txt") as f:
             
         completion_times.append(completion_time)
         
-with open("tc/6/result.txt") as f:
-    sys.stdin = f
     if check:
         F1 = max(completion_times)  # Maximum completion time
         F2 = sum(completion_times)      # Total travel time

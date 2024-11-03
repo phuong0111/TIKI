@@ -268,12 +268,13 @@ class PDPSolver {
     }
 
     void removeStopAfter(Route &route, StopNode *after) {
-        if (route.stops == nullptr) return;
+        if (route.stops == nullptr)
+            return;
 
         // If after is nullptr, remove first stop
         if (after == nullptr) {
             StopNode *temp = route.stops;
-            
+
             // Update costs
             route.cost -= temp->duration; // Remove stop duration
             if (temp->next != nullptr) {
@@ -292,10 +293,11 @@ class PDPSolver {
         }
 
         // If trying to remove after the last node
-        if (after->next == nullptr) return;
+        if (after->next == nullptr)
+            return;
 
         StopNode *temp = after->next;
-        
+
         // Update costs
         route.cost -= temp->duration; // Remove stop duration
 
@@ -306,9 +308,9 @@ class PDPSolver {
             route.cost += getDistance(after->point, temp->next->point); // Add prev->next
         } else {
             // Removing last stop
-            route.cost -= getDistance(after->point, temp->point);   // Remove prev->removed
-            route.cost -= getDistance(temp->point, route.depot);    // Remove removed->depot
-            route.cost += getDistance(after->point, route.depot);   // Add new last->depot
+            route.cost -= getDistance(after->point, temp->point); // Remove prev->removed
+            route.cost -= getDistance(temp->point, route.depot);  // Remove removed->depot
+            route.cost += getDistance(after->point, route.depot); // Add new last->depot
         }
 
         after->next = temp->next;
@@ -577,8 +579,11 @@ class PDPSolver {
 
                 StopNode *pickup_ptr = nullptr;
                 for (size_t pickup_pos = 0; pickup_pos <= routeSize; pickup_pos++) {
-                    StopNode *delivery_ptr = pickup_ptr;
-                    for (size_t delivery_pos = pickup_pos; delivery_pos <= routeSize; delivery_pos++) {
+                    if (pickup_ptr != nullptr && (pickup_ptr->action == PICKUP_CONTAINER || pickup_ptr->action == PICKUP_CONTAINER_TRAILER) && (req.size == FORTY_FT || pickup_ptr->size == FORTY_FT)) {
+                        pickup_ptr = (pickup_ptr == nullptr) ? route.stops : pickup_ptr->next;
+                        continue;
+                    }
+                    for (size_t delivery_pos = pickup_pos; delivery_pos <= ((req.size == TWENTY_FT) ? routeSize : pickup_pos); delivery_pos++) {
                         // Try regular container operations
                         {
                             Route testRoute = route;
@@ -636,8 +641,6 @@ class PDPSolver {
                                 }
                             }
                         }
-
-                        delivery_ptr = (delivery_ptr == nullptr) ? route.stops : delivery_ptr->next;
                     }
                     pickup_ptr = (pickup_ptr == nullptr) ? route.stops : pickup_ptr->next;
                 }
