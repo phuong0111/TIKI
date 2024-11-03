@@ -219,6 +219,62 @@ class PDPSolver {
         }
     }
 
+    // Helper function to remove a stop from specific position
+    void removeStop(Route &route, int position) {
+        if (route.stops == nullptr) {
+            return;
+        }
+
+        if (position == 0) {
+            StopNode *temp = route.stops;
+
+            // Update costs
+            route.cost -= temp->duration; // Remove stop duration
+            if (temp->next != nullptr) {
+                route.cost -= getDistance(route.depot, temp->point);       // Remove depot->removed
+                route.cost -= getDistance(temp->point, temp->next->point); // Remove removed->next
+                route.cost += getDistance(route.depot, temp->next->point); // Add depot->new first
+            } else {
+                // If this was the only stop
+                route.cost -= getDistance(route.depot, temp->point);
+                route.cost -= getDistance(temp->point, route.depot);
+            }
+
+            route.stops = route.stops->next;
+            delete temp;
+            return;
+        }
+
+        StopNode *curr = route.stops;
+        int currentPos = 0;
+        while (curr != nullptr && currentPos < position - 1) {
+            curr = curr->next;
+            currentPos++;
+        }
+
+        if (curr != nullptr && curr->next != nullptr) {
+            StopNode *temp = curr->next;
+
+            // Update costs
+            route.cost -= temp->duration; // Remove stop duration
+
+            if (temp->next != nullptr) {
+                // If removing from middle
+                route.cost -= getDistance(curr->point, temp->point);       // Remove prev->removed
+                route.cost -= getDistance(temp->point, temp->next->point); // Remove removed->next
+                route.cost += getDistance(curr->point, temp->next->point); // Add prev->next
+            } else {
+                // If removing last stop
+                route.cost -= getDistance(curr->point, temp->point); // Remove prev->removed
+                route.cost -= getDistance(temp->point, route.depot); // Remove removed->depot
+                route.cost += getDistance(curr->point, route.depot); // Add new last->depot
+            }
+
+            curr->next = curr->next->next;
+            delete temp;
+        }
+    }
+
     // Helper function to insert stop method with pointer parameter
     void insertStopAfter(Route &route, const StopNode &stop, StopNode *after) {
         StopNode *newNode = new StopNode(stop);
@@ -457,35 +513,84 @@ class PDPSolver {
     }
 
     void updateTrailerOperations(Route &route) {
-        if (route.stops == nullptr)
+        if (route.stops == nullptr) {
             return;
-
-        bool current_has_trailer = false;
-        StopNode *curr = route.stops;
-        StopNode *prev = nullptr;
-
-        // First pass: Check initial state and need for initial trailer pickup
-        if (curr->action == PICKUP_CONTAINER) {
-            insertStopAfter(route,
-                            StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time),
-                            nullptr); // nullptr indicates insert at start
-            current_has_trailer = true;
         }
 
-        // Main pass: Process all stops
+        bool current_has_trailer = false;
+        bool need_trailer = false;
+        StopNode *curr = route.stops;
+
+        // First pass: Mark for removal any unnecessary trailer operations
         while (curr != nullptr) {
-            if (curr->action == PICKUP_CONTAINER_TRAILER ||
-                curr->action == PICKUP_TRAILER) {
+            // Check next nodes to see if we need a trailer
+            StopNode *look_ahead = curr->next;
+            need_trailer = false;
+            while (look_ahead != nullptr) {
+                if (look_ahead->action == PICKUP_CONTAINER ||
+                    look_ahead->action == PICKUP_CONTAINER_TRAILER ||
+                    look_ahead->action == DROP_CONTAINER ||
+                    look_ahead->action == DROP_CONTAINER_TRAILER) {
+                    need_trailer = true;
+                    break;
+                }
+                look_ahead = look_ahead->next;
+            }
+
+            // Update trailer state based on current action
+            if (curr->action == PICKUP_TRAILER) {
+                if (!need_trailer) {
+                    // Mark for removal by setting request_id to -2
+                    curr->request_id = -2;
+                }
                 current_has_trailer = true;
-            } else if (curr->action == DROP_CONTAINER_TRAILER ||
-                       curr->action == DROP_TRAILER) {
+            } else if (curr->action == DROP_TRAILER) {
+                if (need_trailer) {
+                    // Mark for removal
+                    curr->request_id = -2;
+                }
                 current_has_trailer = false;
-            } else if (!current_has_trailer && curr->action == PICKUP_CONTAINER) {
+            } else if (curr->action == PICKUP_CONTAINER_TRAILER ||
+                       curr->action == DROP_CONTAINER_TRAILER) {
+                current_has_trailer = (curr->action == PICKUP_CONTAINER_TRAILER);
+            }
+
+            curr = curr->next;
+        }
+
+        // Remove marked nodes
+        curr = route.stops;
+        while (curr != nullptr) {
+            while (curr->next != nullptr && curr->next->request_id == -2) {
+                removeStopAfter(route, curr);
+            }
+            curr = curr->next;
+        }
+        // Check first node
+        while (route.stops != nullptr && route.stops->request_id == -2) {
+            removeStop(route, 0);
+        }
+
+        // Second pass: Insert necessary trailer operations
+        current_has_trailer = false;
+        curr = route.stops;
+        StopNode *prev = nullptr;
+
+        while (curr != nullptr) {
+            if (!current_has_trailer &&
+                (curr->action == PICKUP_CONTAINER ||
+                 curr->action == DROP_CONTAINER)) {
                 // Need trailer but don't have one
                 insertStopAfter(route,
                                 StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time),
                                 prev);
                 current_has_trailer = true;
+            } else if (curr->action == PICKUP_CONTAINER_TRAILER ||
+                       curr->action == PICKUP_TRAILER) {
+                current_has_trailer = true;
+            } else if (curr->action == DROP_CONTAINER_TRAILER ||
+                       curr->action == DROP_TRAILER) {
+                current_has_trailer = false;
             }
 
             prev = curr;
@@ -494,9 +599,31 @@ class PDPSolver {
 
         // Add final trailer drop if needed
         if (current_has_trailer) {
-            insertStopAfter(route,
-                            StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time),
-                            prev);
+            // Look ahead to see if we really need to keep the trailer
+            bool need_final_drop = true;
+            curr = route.stops;
+            bool found_trailer_op = false;
+
+            while (curr != nullptr) {
+                if (curr->action == DROP_TRAILER || curr->action == DROP_CONTAINER_TRAILER) {
+                    found_trailer_op = true;
+                }
+                if (found_trailer_op &&
+                    (curr->action == PICKUP_CONTAINER ||
+                     curr->action == DROP_CONTAINER ||
+                     curr->action == PICKUP_CONTAINER_TRAILER ||
+                     curr->action == DROP_CONTAINER_TRAILER)) {
+                    need_final_drop = false;
+                    break;
+                }
+                curr = curr->next;
+            }
+
+            if (need_final_drop) {
+                insertStopAfter(route,
+                                StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time),
+                                prev);
+            }
         }
     }
 
@@ -564,7 +691,7 @@ class PDPSolver {
         std::mt19937 gen(rd());
 
         // Shuffle ngẫu nhiên danh sách request IDs
-        // std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
+        std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
 
         // Sau đó xử lý từng request theo thứ tự ngẫu nhiên mới
         for (int req_id : randomRequestIds) {
@@ -586,7 +713,6 @@ class PDPSolver {
                     }
                     StopNode *drop_ptr = pickup_ptr;
                     for (size_t delivery_pos = pickup_pos; delivery_pos <= ((req.size == TWENTY_FT) ? routeSize : pickup_pos); delivery_pos++) {
-                        std::cout << delivery_pos << std::endl;
                         // Try regular container operations
                         {
                             Route testRoute = route;
@@ -652,7 +778,6 @@ class PDPSolver {
 
             if (bestRoute != -1) {
                 currentSolution[bestRoute] = bestRouteConfig;
-                currentSolution[bestRoute].cost = calculateRouteCost(currentSolution[bestRoute]);
             }
         }
     }
