@@ -586,6 +586,7 @@ class PDPSolver {
                     auto drop_it = pickup_it;
                     size_t delivery_pos = pickup_pos;
                     do {
+                        
                         // Try regular container operations
                         {
                             Route testRoute = route;
