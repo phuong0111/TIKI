@@ -736,40 +736,6 @@ class PDPSolver {
                                 }
                             }
                         }
-
-                        // Try container with trailer operations if applicable
-                        {
-                            Route testRoute = route;
-
-                            // Add trailer operations
-                            if (req.pickup_action == PICKUP_CONTAINER_TRAILER) {
-                                insertStop(testRoute,
-                                           StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time),
-                                           pickup_pos);
-                            } else {
-                                insertStop(testRoute,
-                                           StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time),
-                                           pickup_pos);
-                            }
-
-                            insertStop(testRoute,
-                                       StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
-                                       pickup_pos + 1);
-                            insertStop(testRoute,
-                                       StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
-                                       delivery_pos + 2);
-
-                            updateTrailerOperations(testRoute);
-
-                            if (isRouteValid(testRoute)) {
-                                ll newCost = testRoute.cost;
-                                if (newCost < bestCost) {
-                                    bestCost = newCost;
-                                    bestRoute = routeIdx;
-                                    bestRouteConfig = testRoute;
-                                }
-                            }
-                        }
                         drop_ptr = (drop_ptr == nullptr) ? route.stops : drop_ptr->next;
                     }
                     pickup_ptr = (pickup_ptr == nullptr) ? route.stops : pickup_ptr->next;
