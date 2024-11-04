@@ -586,7 +586,8 @@ class PDPSolver {
                     auto drop_it = pickup_it;
                     size_t delivery_pos = pickup_pos;
                     do {
-                        
+                        if (delivery_pos > pickup_pos && drop_it->size == FORTY_FT)
+                            break;
                         // Try regular container operations
                         {
                             Route testRoute = route;
