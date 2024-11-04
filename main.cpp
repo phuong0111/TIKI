@@ -47,102 +47,21 @@ struct StopNode {
     int point;
     Action action;
     ll duration;
-    StopNode *next;
 
-    // Constructor
     StopNode(int req_id, ContainerSize sz, int pt, Action act, ll dur)
-        : request_id(req_id), size(sz), point(pt), action(act), duration(dur), next(nullptr) {}
-
-    // Copy constructor
-    StopNode(const StopNode &other)
-        : request_id(other.request_id),
-          size(other.size),
-          point(other.point),
-          action(other.action),
-          duration(other.duration),
-          next(nullptr) {}
+        : request_id(req_id), size(sz), point(pt), action(act), duration(dur) {}
 };
 
 struct Route {
     int depot;
-    StopNode *stops;
+    std::list<StopNode> stops;
     ll cost;
 
-    // Default constructor
-    Route() : depot(0), stops(nullptr), cost(0) {}
+    Route() : depot(0), cost(0) {}
+    Route(int d) : depot(d), cost(0) {}
 
-    // Constructor with depot
-    Route(int d) : depot(d), stops(nullptr), cost(0) {}
-
-    // Deep copy constructor
-    Route(const Route &other) : depot(other.depot), cost(other.cost) {
-        if (other.stops == nullptr) {
-            stops = nullptr;
-            return;
-        }
-
-        stops = new StopNode(*other.stops);
-        StopNode *curr = stops;
-        StopNode *otherCurr = other.stops->next;
-
-        while (otherCurr != nullptr) {
-            curr->next = new StopNode(*otherCurr);
-            curr = curr->next;
-            otherCurr = otherCurr->next;
-        }
-    }
-
-    // Assignment operator
-    Route &operator=(const Route &other) {
-        if (this != &other) {
-            // Delete existing nodes
-            StopNode *current = stops;
-            while (current != nullptr) {
-                StopNode *next = current->next;
-                delete current;
-                current = next;
-            }
-
-            depot = other.depot;
-            cost = other.cost;
-
-            if (other.stops == nullptr) {
-                stops = nullptr;
-                return *this;
-            }
-
-            stops = new StopNode(*other.stops);
-            StopNode *curr = stops;
-            StopNode *otherCurr = other.stops->next;
-
-            while (otherCurr != nullptr) {
-                curr->next = new StopNode(*otherCurr);
-                curr = curr->next;
-                otherCurr = otherCurr->next;
-            }
-        }
-        return *this;
-    }
-
-    // Destructor
-    ~Route() {
-        StopNode *current = stops;
-        while (current != nullptr) {
-            StopNode *next = current->next;
-            delete current;
-            current = next;
-        }
-    }
-
-    // Get size of the route (number of stops)
     size_t size() const {
-        size_t count = 0;
-        StopNode *current = stops;
-        while (current != nullptr) {
-            count++;
-            current = current->next;
-        }
-        return count;
+        return stops.size();
     }
 };
 
@@ -167,146 +86,127 @@ class PDPSolver {
     const double coolingRate = 0.9995;
 
   public:
-    // Helper function to insert a stop at specific position
     void insertStop(Route &route, const StopNode &stop, int position) {
-        StopNode *newNode = new StopNode(stop);
         if (position == 0) {
             // If inserting at start, handle depot to first stop distance
-            if (route.stops != nullptr) {
-                route.cost -= getDistance(route.depot, route.stops->point); // Remove old depot->first distance
-                route.cost += getDistance(route.depot, stop.point);         // Add new depot->new first distance
-                route.cost += getDistance(stop.point, route.stops->point);  // Add new first->second distance
+            if (!route.stops.empty()) {
+                route.cost -= getDistance(route.depot, route.stops.front().point); // Remove old depot->first distance
+                route.cost += getDistance(route.depot, stop.point);                // Add new depot->new first distance
+                route.cost += getDistance(stop.point, route.stops.front().point);  // Add new first->second distance
             } else {
                 // If this is the only stop, add depot->stop->depot distance
                 route.cost = getDistance(route.depot, stop.point) +
                              getDistance(stop.point, route.depot);
             }
             route.cost += stop.duration; // Add stop duration
-
-            newNode->next = route.stops;
-            route.stops = newNode;
+            route.stops.push_front(stop);
             return;
         }
 
-        StopNode *curr = route.stops;
-        int currentPos = 0;
-        while (curr != nullptr && currentPos < position - 1) {
-            curr = curr->next;
-            currentPos++;
+        auto it = route.stops.begin();
+        for (int i = 0; i < position - 1 && it != route.stops.end(); i++) {
+            ++it;
         }
 
-        if (curr != nullptr) {
+        if (it != route.stops.end()) {
             // Remove old distance between current and next
-            if (curr->next != nullptr) {
-                route.cost -= getDistance(curr->point, curr->next->point);
+            auto next = std::next(it);
+            if (next != route.stops.end()) {
+                route.cost -= getDistance(it->point, next->point);
             } else {
                 // If inserting at end, remove old last->depot distance
-                route.cost -= getDistance(curr->point, route.depot);
+                route.cost -= getDistance(it->point, route.depot);
             }
 
             // Add new distances
-            route.cost += getDistance(curr->point, stop.point); // Previous->new
-            if (curr->next != nullptr) {
-                route.cost += getDistance(stop.point, curr->next->point); // New->next
+            route.cost += getDistance(it->point, stop.point); // Previous->new
+            if (next != route.stops.end()) {
+                route.cost += getDistance(stop.point, next->point); // New->next
             } else {
                 route.cost += getDistance(stop.point, route.depot); // New->depot
             }
 
             route.cost += stop.duration; // Add stop duration
-
-            newNode->next = curr->next;
-            curr->next = newNode;
+            route.stops.insert(next, stop);
         }
     }
 
-    // Helper function to remove a stop from specific position
     void removeStop(Route &route, int position) {
-        if (route.stops == nullptr) {
+        if (route.stops.empty()) {
             return;
         }
 
         if (position == 0) {
-            StopNode *temp = route.stops;
-
-            // Update costs
-            route.cost -= temp->duration; // Remove stop duration
-            if (temp->next != nullptr) {
-                route.cost -= getDistance(route.depot, temp->point);       // Remove depot->removed
-                route.cost -= getDistance(temp->point, temp->next->point); // Remove removed->next
-                route.cost += getDistance(route.depot, temp->next->point); // Add depot->new first
+            // Update costs for removing first stop
+            route.cost -= route.stops.front().duration; // Remove stop duration
+            if (route.stops.size() > 1) {
+                route.cost -= getDistance(route.depot, route.stops.front().point);                           // Remove depot->removed
+                route.cost -= getDistance(route.stops.front().point, std::next(route.stops.begin())->point); // Remove removed->next
+                route.cost += getDistance(route.depot, std::next(route.stops.begin())->point);               // Add depot->new first
             } else {
                 // If this was the only stop
-                route.cost -= getDistance(route.depot, temp->point);
-                route.cost -= getDistance(temp->point, route.depot);
+                route.cost -= getDistance(route.depot, route.stops.front().point);
+                route.cost -= getDistance(route.stops.front().point, route.depot);
             }
-
-            route.stops = route.stops->next;
-            delete temp;
+            route.stops.pop_front();
             return;
         }
 
-        StopNode *curr = route.stops;
-        int currentPos = 0;
-        while (curr != nullptr && currentPos < position - 1) {
-            curr = curr->next;
-            currentPos++;
+        auto it = route.stops.begin();
+        for (int i = 0; i < position - 1 && it != route.stops.end(); i++) {
+            ++it;
         }
 
-        if (curr != nullptr && curr->next != nullptr) {
-            StopNode *temp = curr->next;
-
+        if (it != route.stops.end() && std::next(it) != route.stops.end()) {
+            auto to_remove = std::next(it);
             // Update costs
-            route.cost -= temp->duration; // Remove stop duration
+            route.cost -= to_remove->duration; // Remove stop duration
 
-            if (temp->next != nullptr) {
+            auto next = std::next(to_remove);
+            if (next != route.stops.end()) {
                 // If removing from middle
-                route.cost -= getDistance(curr->point, temp->point);       // Remove prev->removed
-                route.cost -= getDistance(temp->point, temp->next->point); // Remove removed->next
-                route.cost += getDistance(curr->point, temp->next->point); // Add prev->next
+                route.cost -= getDistance(it->point, to_remove->point);   // Remove prev->removed
+                route.cost -= getDistance(to_remove->point, next->point); // Remove removed->next
+                route.cost += getDistance(it->point, next->point);        // Add prev->next
             } else {
                 // If removing last stop
-                route.cost -= getDistance(curr->point, temp->point); // Remove prev->removed
-                route.cost -= getDistance(temp->point, route.depot); // Remove removed->depot
-                route.cost += getDistance(curr->point, route.depot); // Add new last->depot
+                route.cost -= getDistance(it->point, to_remove->point);   // Remove prev->removed
+                route.cost -= getDistance(to_remove->point, route.depot); // Remove removed->depot
+                route.cost += getDistance(it->point, route.depot);        // Add new last->depot
             }
 
-            curr->next = curr->next->next;
-            delete temp;
+            route.stops.erase(to_remove);
         }
     }
 
-    // Helper function to insert stop method with pointer parameter
-    void insertStopAfter(Route &route, const StopNode &stop, StopNode *after) {
-        StopNode *newNode = new StopNode(stop);
-
-        // Case 1: Insert at beginning (after is nullptr)
-        if (after == nullptr) {
-            if (route.stops != nullptr) {
+    void insertStopAfter(Route &route, const StopNode &stop, std::list<StopNode>::iterator after) {
+        // Case 1: Insert at beginning (after is begin())
+        if (after == route.stops.end()) {
+            if (!route.stops.empty()) {
                 // Update costs for inserting at start
-                route.cost -= getDistance(route.depot, route.stops->point); // Remove old depot->first
-                route.cost += getDistance(route.depot, stop.point);         // Add new depot->new
-                route.cost += getDistance(stop.point, route.stops->point);  // Add new->old first
+                route.cost -= getDistance(route.depot, route.stops.front().point); // Remove old depot->first
+                route.cost += getDistance(route.depot, stop.point);                // Add new depot->new
+                route.cost += getDistance(stop.point, route.stops.front().point);  // Add new->old first
             } else {
                 // Empty route, just add depot->stop->depot
                 route.cost = getDistance(route.depot, stop.point) +
                              getDistance(stop.point, route.depot);
             }
             route.cost += stop.duration;
-
-            newNode->next = route.stops;
-            route.stops = newNode;
+            route.stops.push_front(stop);
             return;
         }
 
         // Case 2: Insert after the given node
+        auto next = std::next(after);
         // Remove old distance between current and next
-        if (after->next != nullptr) {
+        if (next != route.stops.end()) {
             // Inserting in middle
-            route.cost -= getDistance(after->point, after->next->point);
+            route.cost -= getDistance(after->point, next->point);
 
             // Add new distances
-            route.cost += getDistance(after->point, stop.point);       // Previous->new
-            route.cost += getDistance(stop.point, after->next->point); // New->next
+            route.cost += getDistance(after->point, stop.point); // Previous->new
+            route.cost += getDistance(stop.point, next->point);  // New->next
         } else {
             // Inserting at end
             route.cost -= getDistance(after->point, route.depot);
@@ -317,116 +217,103 @@ class PDPSolver {
         }
 
         route.cost += stop.duration;
-
-        // Insert the node
-        newNode->next = after->next;
-        after->next = newNode;
+        route.stops.insert(next, stop);
     }
 
-    void removeStopAfter(Route &route, StopNode *after) {
-        if (route.stops == nullptr)
+    void removeStopAfter(Route &route, std::list<StopNode>::iterator after) {
+        if (route.stops.empty())
             return;
 
-        // If after is nullptr, remove first stop
-        if (after == nullptr) {
-            StopNode *temp = route.stops;
-
+        // If after is end(), remove first stop
+        if (after == route.stops.end()) {
             // Update costs
-            route.cost -= temp->duration; // Remove stop duration
-            if (temp->next != nullptr) {
-                route.cost -= getDistance(route.depot, temp->point);       // Remove depot->removed
-                route.cost -= getDistance(temp->point, temp->next->point); // Remove removed->next
-                route.cost += getDistance(route.depot, temp->next->point); // Add depot->new first
+            route.cost -= route.stops.front().duration; // Remove stop duration
+            if (route.stops.size() > 1) {
+                route.cost -= getDistance(route.depot, route.stops.front().point);                           // Remove depot->removed
+                route.cost -= getDistance(route.stops.front().point, std::next(route.stops.begin())->point); // Remove removed->next
+                route.cost += getDistance(route.depot, std::next(route.stops.begin())->point);               // Add depot->new first
             } else {
                 // If this was the only stop
-                route.cost -= getDistance(route.depot, temp->point);
-                route.cost -= getDistance(temp->point, route.depot);
+                route.cost -= getDistance(route.depot, route.stops.front().point);
+                route.cost -= getDistance(route.stops.front().point, route.depot);
             }
-
-            route.stops = route.stops->next;
-            delete temp;
+            route.stops.pop_front();
             return;
         }
 
         // If trying to remove after the last node
-        if (after->next == nullptr)
+        auto to_remove = std::next(after);
+        if (to_remove == route.stops.end())
             return;
 
-        StopNode *temp = after->next;
-
         // Update costs
-        route.cost -= temp->duration; // Remove stop duration
+        route.cost -= to_remove->duration; // Remove stop duration
 
-        if (temp->next != nullptr) {
+        auto next = std::next(to_remove);
+        if (next != route.stops.end()) {
             // Removing from middle
-            route.cost -= getDistance(after->point, temp->point);       // Remove prev->removed
-            route.cost -= getDistance(temp->point, temp->next->point);  // Remove removed->next
-            route.cost += getDistance(after->point, temp->next->point); // Add prev->next
+            route.cost -= getDistance(after->point, to_remove->point); // Remove prev->removed
+            route.cost -= getDistance(to_remove->point, next->point);  // Remove removed->next
+            route.cost += getDistance(after->point, next->point);      // Add prev->next
         } else {
             // Removing last stop
-            route.cost -= getDistance(after->point, temp->point); // Remove prev->removed
-            route.cost -= getDistance(temp->point, route.depot);  // Remove removed->depot
-            route.cost += getDistance(after->point, route.depot); // Add new last->depot
+            route.cost -= getDistance(after->point, to_remove->point); // Remove prev->removed
+            route.cost -= getDistance(to_remove->point, route.depot);  // Remove removed->depot
+            route.cost += getDistance(after->point, route.depot);      // Add new last->depot
         }
 
-        after->next = temp->next;
-        delete temp;
+        route.stops.erase(to_remove);
     }
 
     // Helper function to remove stops by request ID
     void removeStopsByRequestId(Route &route, int requestId) {
         // Handle removals from the start of the route
-        while (route.stops != nullptr && route.stops->request_id == requestId) {
-            StopNode *temp = route.stops;
-
+        while (!route.stops.empty() && route.stops.front().request_id == requestId) {
             // Update cost when removing first stop
-            route.cost -= temp->duration; // Remove stop duration
-            if (temp->next != nullptr) {
+            route.cost -= route.stops.front().duration; // Remove stop duration
+            if (route.stops.size() > 1) {
                 // If there's a next stop, update distances
-                route.cost -= getDistance(route.depot, temp->point);       // Remove depot->removed distance
-                route.cost -= getDistance(temp->point, temp->next->point); // Remove removed->next distance
-                route.cost += getDistance(route.depot, temp->next->point); // Add depot->new first distance
+                route.cost -= getDistance(route.depot, route.stops.front().point);                           // Remove depot->removed distance
+                route.cost -= getDistance(route.stops.front().point, std::next(route.stops.begin())->point); // Remove removed->next distance
+                route.cost += getDistance(route.depot, std::next(route.stops.begin())->point);               // Add depot->new first distance
             } else {
                 // If this was the only stop
-                route.cost -= getDistance(route.depot, temp->point); // Remove depot->removed distance
-                route.cost -= getDistance(temp->point, route.depot); // Remove removed->depot distance
+                route.cost -= getDistance(route.depot, route.stops.front().point); // Remove depot->removed distance
+                route.cost -= getDistance(route.stops.front().point, route.depot); // Remove removed->depot distance
             }
-
-            route.stops = route.stops->next;
-            delete temp;
+            route.stops.pop_front();
         }
 
         // If all stops were removed
-        if (route.stops == nullptr) {
+        if (route.stops.empty()) {
             route.cost = getDistance(route.depot, route.depot); // Set cost to empty route
             return;
         }
 
         // Handle removals from the middle/end of the route
-        StopNode *curr = route.stops;
-        while (curr->next != nullptr) {
-            if (curr->next->request_id == requestId) {
-                StopNode *temp = curr->next;
-
+        auto curr = route.stops.begin();
+        while (curr != route.stops.end()) {
+            auto next = std::next(curr);
+            if (next != route.stops.end() && next->request_id == requestId) {
                 // Update cost
-                route.cost -= temp->duration; // Remove stop duration
+                route.cost -= next->duration; // Remove stop duration
 
-                if (temp->next != nullptr) {
+                auto next_next = std::next(next);
+                if (next_next != route.stops.end()) {
                     // If removing from middle
-                    route.cost -= getDistance(curr->point, temp->point);       // Remove prev->removed distance
-                    route.cost -= getDistance(temp->point, temp->next->point); // Remove removed->next distance
-                    route.cost += getDistance(curr->point, temp->next->point); // Add prev->next distance
+                    route.cost -= getDistance(curr->point, next->point);      // Remove prev->removed distance
+                    route.cost -= getDistance(next->point, next_next->point); // Remove removed->next distance
+                    route.cost += getDistance(curr->point, next_next->point); // Add prev->next distance
                 } else {
                     // If removing last stop
-                    route.cost -= getDistance(curr->point, temp->point); // Remove prev->removed distance
-                    route.cost -= getDistance(temp->point, route.depot); // Remove removed->depot distance
+                    route.cost -= getDistance(curr->point, next->point); // Remove prev->removed distance
+                    route.cost -= getDistance(next->point, route.depot); // Remove removed->depot distance
                     route.cost += getDistance(curr->point, route.depot); // Add new last->depot distance
                 }
 
-                curr->next = curr->next->next;
-                delete temp;
+                route.stops.erase(next);
             } else {
-                curr = curr->next;
+                curr++;
             }
         }
     }
@@ -440,37 +327,36 @@ class PDPSolver {
         int current_load = 0;
         std::vector<std::pair<int, ContainerSize>> current_container;
 
-        StopNode *curr = route.stops;
-        while (curr != nullptr) {
+        for (const auto &stop : route.stops) {
             // Trailer logic
-            if (curr->action == PICKUP_TRAILER || curr->action == PICKUP_CONTAINER_TRAILER) {
+            if (stop.action == PICKUP_TRAILER || stop.action == PICKUP_CONTAINER_TRAILER) {
                 if (has_trailer)
                     return false;
                 has_trailer = true;
             }
 
             // Container pickup logic
-            if (curr->action == PICKUP_CONTAINER) {
+            if (stop.action == PICKUP_CONTAINER) {
                 if (!has_trailer)
                     return false;
-                if (current_load + static_cast<int>(curr->size) > FORTY_FT)
+                if (current_load + static_cast<int>(stop.size) > FORTY_FT)
                     return false;
-                current_load += static_cast<int>(curr->size);
-                current_container.push_back({curr->request_id, curr->size});
-            } else if (curr->action == PICKUP_CONTAINER_TRAILER) {
-                if (current_load + static_cast<int>(curr->size) > FORTY_FT)
+                current_load += static_cast<int>(stop.size);
+                current_container.push_back({stop.request_id, stop.size});
+            } else if (stop.action == PICKUP_CONTAINER_TRAILER) {
+                if (current_load + static_cast<int>(stop.size) > FORTY_FT)
                     return false;
-                current_load += static_cast<int>(curr->size);
-                current_container.push_back({curr->request_id, curr->size});
+                current_load += static_cast<int>(stop.size);
+                current_container.push_back({stop.request_id, stop.size});
             }
 
             // Container drop logic
-            if (curr->action == DROP_CONTAINER || curr->action == DROP_CONTAINER_TRAILER) {
+            if (stop.action == DROP_CONTAINER || stop.action == DROP_CONTAINER_TRAILER) {
                 if (!has_trailer)
                     return false;
                 auto it = std::find_if(current_container.begin(), current_container.end(),
-                                       [curr](const std::pair<int, ContainerSize> &element) {
-                                           return element.first == curr->request_id;
+                                       [&stop](const std::pair<int, ContainerSize> &element) {
+                                           return element.first == stop.request_id;
                                        });
                 if (it == current_container.end())
                     return false;
@@ -479,54 +365,53 @@ class PDPSolver {
             }
 
             // Trailer drop logic
-            if (curr->action == DROP_TRAILER || curr->action == DROP_CONTAINER_TRAILER) {
+            if (stop.action == DROP_TRAILER || stop.action == DROP_CONTAINER_TRAILER) {
                 if (!has_trailer)
                     return false;
                 if (!current_container.empty())
                     return false;
                 has_trailer = false;
             }
-
-            curr = curr->next;
         }
 
         return !has_trailer && current_container.empty() && current_load == 0;
     }
 
-    ll calculateRouteCost(const Route &route, bool debug = false) {
-        if (route.stops == nullptr)
+    ll calculateRouteCost(const Route &route) {
+        if (route.stops.empty())
             return getDistance(route.depot, route.depot);
 
-        ll totalCost = getDistance(route.depot, route.stops->point);
-        totalCost += route.stops->duration;
+        ll totalCost = getDistance(route.depot, route.stops.front().point);
+        totalCost += route.stops.front().duration;
 
-        StopNode *curr = route.stops;
-        while (curr->next != nullptr) {
-            totalCost += getDistance(curr->point, curr->next->point);
-            totalCost += curr->next->duration;
-            curr = curr->next;
+        auto curr = route.stops.begin();
+        auto next = std::next(curr);
+
+        while (next != route.stops.end()) {
+            totalCost += getDistance(curr->point, next->point);
+            totalCost += next->duration;
+            curr++;
+            next++;
         }
 
-        totalCost += getDistance(curr->point, route.depot);
+        totalCost += getDistance(route.stops.back().point, route.depot);
 
         return totalCost;
     }
 
     void updateTrailerOperations(Route &route) {
-        if (route.stops == nullptr) {
+        if (route.stops.empty()) {
             return;
         }
 
         bool current_has_trailer = false;
         bool need_trailer = false;
-        StopNode *curr = route.stops;
 
         // First pass: Mark for removal any unnecessary trailer operations
-        while (curr != nullptr) {
+        for (auto curr = route.stops.begin(); curr != route.stops.end(); ++curr) {
             // Check next nodes to see if we need a trailer
-            StopNode *look_ahead = curr->next;
             need_trailer = false;
-            while (look_ahead != nullptr) {
+            for (auto look_ahead = std::next(curr); look_ahead != route.stops.end(); ++look_ahead) {
                 if (look_ahead->action == PICKUP_CONTAINER ||
                     look_ahead->action == PICKUP_CONTAINER_TRAILER ||
                     look_ahead->action == DROP_CONTAINER ||
@@ -534,7 +419,6 @@ class PDPSolver {
                     need_trailer = true;
                     break;
                 }
-                look_ahead = look_ahead->next;
             }
 
             // Update trailer state based on current action
@@ -554,29 +438,23 @@ class PDPSolver {
                        curr->action == DROP_CONTAINER_TRAILER) {
                 current_has_trailer = (curr->action == PICKUP_CONTAINER_TRAILER);
             }
-
-            curr = curr->next;
         }
 
         // Remove marked nodes
-        curr = route.stops;
-        while (curr != nullptr) {
-            while (curr->next != nullptr && curr->next->request_id == -2) {
-                removeStopAfter(route, curr);
+        auto curr = route.stops.begin();
+        while (curr != route.stops.end()) {
+            if (curr->request_id == -2) {
+                curr = route.stops.erase(curr);
+            } else {
+                ++curr;
             }
-            curr = curr->next;
-        }
-        // Check first node
-        while (route.stops != nullptr && route.stops->request_id == -2) {
-            removeStop(route, 0);
         }
 
         // Second pass: Insert necessary trailer operations
         current_has_trailer = false;
-        curr = route.stops;
-        StopNode *prev = nullptr;
+        auto prev = route.stops.end();
 
-        while (curr != nullptr) {
+        for (auto curr = route.stops.begin(); curr != route.stops.end(); ++curr) {
             if (!current_has_trailer &&
                 (curr->action == PICKUP_CONTAINER ||
                  curr->action == DROP_CONTAINER)) {
@@ -594,29 +472,26 @@ class PDPSolver {
             }
 
             prev = curr;
-            curr = curr->next;
         }
 
         // Add final trailer drop if needed
         if (current_has_trailer) {
             // Look ahead to see if we really need to keep the trailer
             bool need_final_drop = true;
-            curr = route.stops;
             bool found_trailer_op = false;
 
-            while (curr != nullptr) {
-                if (curr->action == DROP_TRAILER || curr->action == DROP_CONTAINER_TRAILER) {
+            for (const auto &stop : route.stops) {
+                if (stop.action == DROP_TRAILER || stop.action == DROP_CONTAINER_TRAILER) {
                     found_trailer_op = true;
                 }
                 if (found_trailer_op &&
-                    (curr->action == PICKUP_CONTAINER ||
-                     curr->action == DROP_CONTAINER ||
-                     curr->action == PICKUP_CONTAINER_TRAILER ||
-                     curr->action == DROP_CONTAINER_TRAILER)) {
+                    (stop.action == PICKUP_CONTAINER ||
+                     stop.action == DROP_CONTAINER ||
+                     stop.action == PICKUP_CONTAINER_TRAILER ||
+                     stop.action == DROP_CONTAINER_TRAILER)) {
                     need_final_drop = false;
                     break;
                 }
-                curr = curr->next;
             }
 
             if (need_final_drop) {
@@ -635,16 +510,14 @@ class PDPSolver {
             int routeIdx = routeDist(gen);
             Route &route = currentSolution[routeIdx];
 
-            if (route.stops != nullptr) {
+            if (!route.stops.empty()) {
                 // Count valid stops
                 std::vector<int> validRequestIds;
-                StopNode *curr = route.stops;
-                while (curr != nullptr) {
-                    if (curr->request_id != -1 &&
-                        std::find(requestsToRemove.begin(), requestsToRemove.end(), curr->request_id) == requestsToRemove.end()) {
-                        validRequestIds.push_back(curr->request_id);
+                for (const auto &stop : route.stops) {
+                    if (stop.request_id != -1 &&
+                        std::find(requestsToRemove.begin(), requestsToRemove.end(), stop.request_id) == requestsToRemove.end()) {
+                        validRequestIds.push_back(stop.request_id);
                     }
-                    curr = curr->next;
                 }
 
                 if (!validRequestIds.empty()) {
@@ -683,17 +556,11 @@ class PDPSolver {
     }
 
     void insertRequests(const std::vector<int> &requestIds) {
-        // Tạo một bản sao để có thể sắp xếp ngẫu nhiên
+        // Create a copy to shuffle randomly
         std::vector<int> randomRequestIds = requestIds;
-
-        // Tạo random generator
-        std::random_device rd;
-        std::mt19937 gen(rd());
-
-        // Shuffle ngẫu nhiên danh sách request IDs
         std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
 
-        // Sau đó xử lý từng request theo thứ tự ngẫu nhiên mới
+        // Process each request in random order
         for (int req_id : randomRequestIds) {
             const Request &req = findRequestById(req_id);
             ll bestCost = std::numeric_limits<ll>::max();
@@ -704,15 +571,21 @@ class PDPSolver {
                 Route &route = currentSolution[routeIdx];
                 size_t routeSize = route.size();
 
-                StopNode *pickup_ptr = nullptr;
-                for (size_t pickup_pos = 0; pickup_pos <= routeSize; pickup_pos++) {
-                    // Added optimization: Skip invalid container size combinations
-                    if (pickup_ptr != nullptr && (pickup_ptr->action == PICKUP_CONTAINER || pickup_ptr->action == PICKUP_CONTAINER_TRAILER) && (req.size == FORTY_FT || pickup_ptr->size == FORTY_FT)) {
-                        pickup_ptr = (pickup_ptr == nullptr) ? route.stops : pickup_ptr->next;
+                auto pickup_it = route.stops.end();
+                size_t pickup_pos = 0;
+                do {
+                    // Skip invalid container size combinations
+                    if (pickup_it != route.stops.end() &&
+                        (pickup_it->action == PICKUP_CONTAINER || pickup_it->action == PICKUP_CONTAINER_TRAILER) &&
+                        (req.size == FORTY_FT || pickup_it->size == FORTY_FT)) {
+                        (pickup_it != route.stops.end()) ? ++pickup_it : (pickup_it = route.stops.begin());
+                        ++pickup_pos;
                         continue;
                     }
-                    StopNode *drop_ptr = pickup_ptr;
-                    for (size_t delivery_pos = pickup_pos; delivery_pos <= ((req.size == TWENTY_FT) ? routeSize : pickup_pos); delivery_pos++) {
+
+                    auto drop_it = pickup_it;
+                    size_t delivery_pos = pickup_pos;
+                    do {
                         // Try regular container operations
                         {
                             Route testRoute = route;
@@ -736,10 +609,14 @@ class PDPSolver {
                                 }
                             }
                         }
-                        drop_ptr = (drop_ptr == nullptr) ? route.stops : drop_ptr->next;
-                    }
-                    pickup_ptr = (pickup_ptr == nullptr) ? route.stops : pickup_ptr->next;
-                }
+
+                        (drop_it != route.stops.end()) ? ++drop_it : (drop_it = route.stops.begin());
+                        ++delivery_pos;
+                    } while (delivery_pos <= ((req.size == TWENTY_FT) ? routeSize : pickup_pos));
+
+                    (pickup_it != route.stops.end()) ? ++pickup_it : (pickup_it = route.stops.begin());
+                    ++pickup_pos;
+                } while (pickup_pos <= routeSize);
             }
 
             if (bestRoute != -1) {
@@ -913,15 +790,13 @@ struct IO {
     }
 
     void output_route(const Route &route) {
-        StopNode *curr = route.stops;
-        while (curr != nullptr) {
-            std::cout << curr->point << " " << actions[curr->action];
-            if (curr->action == PICKUP_CONTAINER || curr->action == PICKUP_CONTAINER_TRAILER ||
-                curr->action == DROP_CONTAINER || curr->action == DROP_CONTAINER_TRAILER) {
-                std::cout << " " << curr->request_id;
+        for (const auto &stop : route.stops) {
+            std::cout << stop.point << " " << actions[stop.action];
+            if (stop.action == PICKUP_CONTAINER || stop.action == PICKUP_CONTAINER_TRAILER ||
+                stop.action == DROP_CONTAINER || stop.action == DROP_CONTAINER_TRAILER) {
+                std::cout << " " << stop.request_id;
             }
             std::cout << std::endl;
-            curr = curr->next;
         }
         std::cout << route.depot << " STOP" << std::endl;
         std::cout << "#" << std::endl;
