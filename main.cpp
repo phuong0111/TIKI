@@ -79,7 +79,7 @@ class PDPSolver {
     int trailer_point;
     int trailer_pickup_time;
     int max_iterations;
-    int max_attempt = 20;
+    int max_attempt = 50;
     bool verbose;
 
     const double temperature = 100.0;
@@ -666,6 +666,10 @@ class PDPSolver {
     }
 
     void solve() {
+        // Add time tracking
+        const auto start_time = std::chrono::steady_clock::now();
+        const int TIME_LIMIT_SECONDS = 30 - 2;
+
         // Initialize unassigned requests
         std::vector<int> unassignedRequests;
         for (const Request &req : requests) {
@@ -681,6 +685,16 @@ class PDPSolver {
         ll lastBestCost = bestSolutionCost;
 
         for (int iter = 0; iter < max_iterations; iter++) {
+            // Check time limit
+            const auto current_time = std::chrono::steady_clock::now();
+            const auto elapsed_time = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+            if (elapsed_time >= TIME_LIMIT_SECONDS) {
+                if (verbose) {
+                    std::cout << "Time limit reached after " << iter << " iterations" << std::endl;
+                }
+                break;
+            }
+
             std::vector<int> removedRequests;
             removeRandomRequests(removedRequests, max_attempt);
             // std::cout << "Iter: " << iter + 1 << " ";
