@@ -66,7 +66,7 @@ struct Route {
 };
 
 std::array<std::array<ll, MAX_POINT>, MAX_POINT> distances;
-std::array<int, MAX_VEHICLES> vehicle_depots;
+std::array<int, MAX_VEHICLES> vehicleDepots;
 std::array<Route, MAX_VEHICLES> currentSolution;
 
 class PDPSolver {
@@ -663,7 +663,7 @@ class PDPSolver {
           verbose(verbose),
           gen(rd()) {
         for (int i = 0; i < num_vehicles; i++) {
-            currentSolution[i].depot = vehicle_depots[i];
+            currentSolution[i].depot = vehicleDepots[i];
         }
     }
 
@@ -780,7 +780,7 @@ struct IO {
         for (int i = 0; i < num_vehicles; i++) {
             int truck_id, truck_point;
             std::cin >> truck_id >> truck_point;
-            vehicle_depots[truck_id - 1] = truck_point;
+            vehicleDepots[truck_id - 1] = truck_point;
         }
 
         while (true) {
