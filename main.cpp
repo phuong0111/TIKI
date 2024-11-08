@@ -75,11 +75,10 @@ struct Route {
 std::array<std::array<ll, MAX_POINT>, MAX_POINT> distances;
 std::array<int, MAX_VEHICLES> vehicleDepots;
 std::array<Route, MAX_VEHICLES> currentSolution;
-std::array<Request, MAX_REQUESTS> requests;
 
 class PDPSolver {
   private:
-    std::vector<int> requestIdx;
+    std::vector<Request> requests;
     int num_vehicles;
     std::random_device rd;
     std::mt19937 gen;
@@ -296,7 +295,7 @@ class PDPSolver {
 
         // Process each request in random order
         for (int req_id : randomRequestIds) {
-            const Request &req = requests[req_id];
+            const Request &req = findRequestById(req_id);
             ll bestCost = std::numeric_limits<ll>::max();
             int bestRoute = -1;
             Route bestRouteConfig;
@@ -305,7 +304,11 @@ class PDPSolver {
                 Route &route = currentSolution[routeIdx];
                 size_t routeSize = route.size();
 
+                auto pickup_it = route.stops.begin();
                 for (size_t pickup_pos = 0; pickup_pos <= routeSize; pickup_pos++) {
+                    auto drop_it = pickup_it;
+                    if ((req.size == FORTY_FT || pickup_it->size == FORTY_FT) && (pickup_it->action == DROP_CONTAINER || pickup_it->action == DROP_CONTAINER_TRAILER))
+                        continue;
                     for (size_t delivery_pos = pickup_pos; delivery_pos <= routeSize; delivery_pos++) {
                         // Try regular container operations
                         {
@@ -330,6 +333,8 @@ class PDPSolver {
                                 }
                             }
                         }
+                        if (req.size == FORTY_FT)
+                            break;
                     }
                 }
             }
@@ -370,14 +375,14 @@ class PDPSolver {
         return alpha * calculateF1() + calculateF2();
     }
 
-    PDPSolver(const std::vector<int> &requestIdx,
+    PDPSolver(const std::vector<Request> &requests,
               int num_vehicles,
               int alpha,
               int trailer_point,
               int trailer_pickup_time,
               int max_iterations,
               bool verbose)
-        : requestIdx(requestIdx),
+        : requests(requests),
           num_vehicles(num_vehicles),
           alpha(alpha),
           trailer_point(trailer_point),
@@ -393,7 +398,11 @@ class PDPSolver {
     void solve() {
         auto start_time = chrono::high_resolution_clock::now();
 
-        insertRequests(requestIdx);
+        vector<int> unassignedRequests;
+        for (const Request &req : requests) {
+            unassignedRequests.push_back(req.id);
+        }
+        insertRequests(unassignedRequests);
 
         double currentTemp = temperature;
         ll currentSolutionCost = calculateSolutionCost();
@@ -460,7 +469,7 @@ class PDPSolver {
 };
 
 struct IO {
-    std::vector<int> requestIdx;
+    std::vector<Request> requests;
     int num_vehicles;
     int trailer_point;
     int trailer_pickup_time;
@@ -525,8 +534,7 @@ struct IO {
                 drop_point,
                 getAction(drop_action),
                 drop_duration};
-            requests[id] = (request);
-            requestIdx.push_back(id);
+            requests.push_back(request);
         }
     }
 
@@ -544,7 +552,7 @@ struct IO {
     }
 
     void output() {
-        PDPSolver solver(requestIdx, num_vehicles, alpha, trailer_point,
+        PDPSolver solver(requests, num_vehicles, alpha, trailer_point,
                          trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
@@ -563,7 +571,7 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    freopen("tc/2/inp.txt", "r", stdin);
+    // freopen("tc/2/inp.txt", "r", stdin);
 
     IO io(100000, 1000000, 0);
     io.input();
