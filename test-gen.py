@@ -25,13 +25,7 @@ def gen(num_point: int, num_vehicles: int, num_requests: int):
     
     for i in range(1, num_point + 1):
         for j in range(1, num_point + 1):
-            if i == j:
-                pass
-            elif i < j:
-                distances[i][j] = get_rand(distance_range)
-            else:
-                distances[i][j] = distances[j][i]
-            print(i, j, distances[i][j])
+            distances[i][j] = get_rand(distance_range)
     
     print(f"TRAILER {get_rand((1, num_point))} {get_rand(operation_range)}")
     print(f"TRUCK {num_vehicles}")
