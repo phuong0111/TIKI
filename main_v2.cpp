@@ -60,10 +60,20 @@ struct Route {
     }
 };
 
+struct RequestContext {
+    int request_id;
+    ll transitionCost;                 // Cost of transitions (prev->curr->next)
+    ll selfCost;                       // Cost of request itself (pickup + drop duration)
+    int routeIdx;                      // Which route this request is in
+    std::list<int>::iterator position; // Position in route
+};
+
 std::array<std::array<ll, MAX_POINT>, MAX_POINT> distances;
 std::array<int, MAX_VEHICLES> vehicleDepots;
 std::array<Route, MAX_VEHICLES> currentSolution;
 std::array<Request, MAX_REQUESTS> requests;
+std::array<RequestContext, MAX_REQUESTS> requestContexts;
+std::array<bool, MAX_REQUESTS> isRequestRemoved;
 
 class PDPSolver {
   private:
@@ -148,11 +158,54 @@ class PDPSolver {
         return route.cost + costDelta;
     }
 
+    ll calculateRemovalCost(Route &route, const int request_id) {
+        auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), request_id);
+        if (it == route.list_reqs.end())
+            return route.cost; // Request not found
+
+        const Request &req = requests[request_id];
+        ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
+
+        if (route.list_reqs.size() == 1) {
+            // If this is the only request
+            costDelta -= calculateDepotToRequestCost(route.depot, req);
+            costDelta -= calculateRequestToDepotCost(req, route.depot);
+            return 0; // Route will be empty
+        }
+
+        if (it == route.list_reqs.begin()) {
+            // If removing first request
+            const Request &next_req = requests[*std::next(it)];
+            costDelta -= calculateDepotToRequestCost(route.depot, req);
+            costDelta -= calculateRequestTransitionCost(req, next_req);
+            costDelta += calculateDepotToRequestCost(route.depot, next_req);
+        } else if (std::next(it) == route.list_reqs.end()) {
+            // If removing last request
+            const Request &prev_req = requests[*std::prev(it)];
+            costDelta -= calculateRequestTransitionCost(prev_req, req);
+            costDelta -= calculateRequestToDepotCost(req, route.depot);
+            costDelta += calculateRequestToDepotCost(prev_req, route.depot);
+        } else {
+            // If removing from middle
+            const Request &prev_req = requests[*std::prev(it)];
+            const Request &next_req = requests[*std::next(it)];
+            costDelta -= calculateRequestTransitionCost(prev_req, req);
+            costDelta -= calculateRequestTransitionCost(req, next_req);
+            costDelta += calculateRequestTransitionCost(prev_req, next_req);
+        }
+
+        return route.cost + costDelta;
+    }
+
     void removeStopsByRequestId(Route &route, int request_id) {
-        route.list_reqs.remove_if([request_id](const int requestId) {
-            return request_id == requestId;
-        });
-        // route.cost = calculateRouteCost(route);
+        // Calculate new cost before modifying the list
+        ll newCost = calculateRemovalCost(route, request_id);
+
+        // Remove the request
+        route.list_reqs.remove(request_id);
+
+        // Update route cost
+        route.cost = newCost;
     }
 
     // Helper function to calculate route cost
@@ -207,6 +260,49 @@ class PDPSolver {
         return total_cost;
     }
 
+    // The updateRequestContext method becomes cleaner without trailer tracking
+    void updateRequestContext(int req_id, Route &route, std::list<int>::iterator it) {
+        RequestContext &context = requestContexts[req_id];
+        context.request_id = req_id;
+        context.routeIdx = &route - &currentSolution[0];
+        context.position = it;
+
+        const Request &curr_req = requests[req_id];
+        context.selfCost = calculateRequestContextCost(curr_req);
+
+        // Calculate transition cost
+        ll transitionCost = 0;
+
+        if (it == route.list_reqs.begin()) {
+            // First request
+            transitionCost += calculateDepotToRequestCost(route.depot, curr_req);
+            if (std::next(it) != route.list_reqs.end()) {
+                const Request &next_req = requests[*std::next(it)];
+                transitionCost += calculateRequestTransitionCost(curr_req, next_req);
+                transitionCost -= calculateDepotToRequestCost(route.depot, next_req);
+            } else {
+                transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
+            }
+        } else {
+            const Request &prev_req = requests[*std::prev(it)];
+
+            if (std::next(it) == route.list_reqs.end()) {
+                // Last request
+                transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
+                transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
+                transitionCost -= calculateRequestToDepotCost(prev_req, route.depot);
+            } else {
+                // Middle request
+                const Request &next_req = requests[*std::next(it)];
+                transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
+                transitionCost += calculateRequestTransitionCost(curr_req, next_req);
+                transitionCost -= calculateRequestTransitionCost(prev_req, next_req);
+            }
+        }
+
+        context.transitionCost = transitionCost;
+    }
+
     void removeRandomRequests(std::vector<int> &requestsToRemove, int max_attempt) {
         // Create a vector of route indices sorted by cost (descending order)
         std::vector<std::pair<ll, int>> routeCosts;
@@ -216,7 +312,6 @@ class PDPSolver {
             }
         }
 
-        // Sort routes by cost in descending order
         std::sort(routeCosts.begin(), routeCosts.end(),
                   [](const auto &a, const auto &b) { return a.first > b.first; });
 
@@ -227,19 +322,12 @@ class PDPSolver {
         std::vector<double> probabilities(routeCosts.size());
         int k = std::min(static_cast<int>(routeCosts.size()), std::max(2, max_attempt / 4));
 
-        // Higher probability for top k expensive routes
         for (size_t i = 0; i < routeCosts.size(); i++) {
-            if (i < k) {
-                probabilities[i] = 0.8 / k; // 80% chance to select from top k routes
-            } else {
-                probabilities[i] = 0.2 / (routeCosts.size() - k); // 20% chance for other routes
-            }
+            probabilities[i] = (i < k) ? 0.8 / k : 0.2 / (routeCosts.size() - k);
         }
 
         int attempt = 0;
-        std::set<int> modifiedRouteIdx;
-        while (attempt < max_attempt) {
-            // Select route based on probabilities
+        while (requestsToRemove.size() < max_attempt) {
             std::discrete_distribution<> routeDist(probabilities.begin(), probabilities.end());
             int routeIdx = routeCosts[routeDist(gen)].second;
             Route &route = currentSolution[routeIdx];
@@ -247,115 +335,73 @@ class PDPSolver {
             if (route.list_reqs.empty())
                 continue;
 
-            // Calculate contextual costs for requests in the selected route
-            std::vector<std::pair<ll, int>> requestContextCosts;
-            auto it = route.list_reqs.begin();
-
-            while (it != route.list_reqs.end()) {
-                int curr_req_id = *it;
-
-                // Skip if already marked for removal
-                if (std::find(requestsToRemove.begin(), requestsToRemove.end(),
-                              curr_req_id) != requestsToRemove.end()) {
-                    ++it;
-                    continue;
+            // Find highest cost requests in this route
+            std::vector<std::pair<ll, int>> routeRequestCosts;
+            for (auto it = route.list_reqs.begin(); it != route.list_reqs.end(); ++it) {
+                int req_id = *it;
+                if (!isRequestRemoved[req_id]) {
+                    updateRequestContext(req_id, route, it);
+                    routeRequestCosts.push_back({requestContexts[req_id].transitionCost + requestContexts[req_id].selfCost,
+                                                 req_id});
                 }
-
-                const Request &curr_req = requests[curr_req_id];
-                ll context_cost = 0;
-
-                // Get previous request in route
-                int prev_point = route.depot;
-                bool has_trailer = false;
-                if (it != route.list_reqs.begin()) {
-                    auto prev_it = std::prev(it);
-                    const Request &prev_req = requests[*prev_it];
-                    prev_point = prev_req.drop_point;
-                    has_trailer = (prev_req.drop_action != DROP_CONTAINER_TRAILER);
-                }
-
-                // Calculate transition cost from previous point/state
-                if (curr_req.pickup_action == PICKUP_CONTAINER && !has_trailer) {
-                    context_cost += getDistance(prev_point, trailer_point) +
-                                    trailer_pickup_time +
-                                    getDistance(trailer_point, curr_req.pickup_point);
-                } else if (curr_req.pickup_action == PICKUP_CONTAINER_TRAILER && has_trailer) {
-                    context_cost += getDistance(prev_point, trailer_point) +
-                                    trailer_pickup_time +
-                                    getDistance(trailer_point, curr_req.pickup_point);
-                } else {
-                    context_cost += getDistance(prev_point, curr_req.pickup_point);
-                }
-
-                // Get next request in route
-                int next_point = route.depot;
-                if (std::next(it) != route.list_reqs.end()) {
-                    auto next_it = std::next(it);
-                    const Request &next_req = requests[*next_it];
-                    next_point = next_req.pickup_point;
-
-                    bool needs_trailer_after = (next_req.pickup_action == PICKUP_CONTAINER_TRAILER);
-                    bool has_trailer_after = (curr_req.drop_action != DROP_CONTAINER_TRAILER);
-
-                    if (has_trailer_after && needs_trailer_after) {
-                        context_cost += getDistance(curr_req.drop_point, trailer_point) +
-                                        trailer_pickup_time +
-                                        getDistance(trailer_point, next_point);
-                    } else {
-                        context_cost += getDistance(curr_req.drop_point, next_point);
-                    }
-                } else {
-                    if (curr_req.drop_action != DROP_CONTAINER_TRAILER) {
-                        context_cost += getDistance(curr_req.drop_point, trailer_point) +
-                                        trailer_pickup_time +
-                                        getDistance(trailer_point, route.depot);
-                    } else {
-                        context_cost += getDistance(curr_req.drop_point, route.depot);
-                    }
-                }
-
-                requestContextCosts.push_back({context_cost, curr_req_id});
-                ++it;
             }
 
-            if (!requestContextCosts.empty()) {
-                // Sort by context-aware costs
-                std::sort(requestContextCosts.begin(), requestContextCosts.end(),
+            if (!routeRequestCosts.empty()) {
+                std::sort(routeRequestCosts.begin(), routeRequestCosts.end(),
                           [](const auto &a, const auto &b) { return a.first > b.first; });
 
-                // Select one of the top expensive requests (with some randomness)
                 std::uniform_int_distribution<> topDist(0,
-                                                        std::min(2, static_cast<int>(requestContextCosts.size()) - 1));
+                                                        std::min(2, static_cast<int>(routeRequestCosts.size()) - 1));
                 int selectedIdx = topDist(gen);
-                int selectedRequestId = requestContextCosts[selectedIdx].second;
+                int selectedRequestId = routeRequestCosts[selectedIdx].second;
 
-                // Remove the selected request
+                // Store prev and next request IDs before removal
+                auto currentPos = requestContexts[selectedRequestId].position;
+                int prevRequestId = -1, nextRequestId = -1;
+                bool hasPrev = currentPos != route.list_reqs.begin();
+                bool hasNext = std::next(currentPos) != route.list_reqs.end();
+
+                if (hasPrev) {
+                    prevRequestId = *std::prev(currentPos);
+                }
+                if (hasNext) {
+                    nextRequestId = *std::next(currentPos);
+                }
+
+                // Remove request
                 removeStopsByRequestId(route, selectedRequestId);
-                modifiedRouteIdx.insert(routeIdx);
                 requestsToRemove.push_back(selectedRequestId);
+                isRequestRemoved[selectedRequestId] = true;
+
+                // Update contexts of adjacent requests after removal
+                if (hasPrev && hasNext) {
+                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), prevRequestId);
+                    updateRequestContext(prevRequestId, route, it);
+                    it = std::find(route.list_reqs.begin(), route.list_reqs.end(), nextRequestId);
+                    updateRequestContext(nextRequestId, route, it);
+                } else if (hasPrev) {
+                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), prevRequestId);
+                    updateRequestContext(prevRequestId, route, it);
+                } else if (hasNext) {
+                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), nextRequestId);
+                    updateRequestContext(nextRequestId, route, it);
+                }
             }
             attempt++;
         }
-
-        for (const int idx : modifiedRouteIdx)
-            currentSolution[idx].cost = calculateRouteCost(currentSolution[idx]);
     }
 
     void insertRequests(const std::vector<int> &requestIds) {
-        // Create a copy for random shuffling
         std::vector<int> randomRequestIds = requestIds;
         std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
 
-        // Process each request in random order
         for (int req_id : randomRequestIds) {
             ll bestCost = std::numeric_limits<ll>::max();
             int bestRoute = -1;
-            Route bestRouteConfig;
             std::list<int>::iterator bestPosition;
 
             for (size_t routeIdx = 0; routeIdx < num_vehicles; routeIdx++) {
                 Route &route = currentSolution[routeIdx];
-                // Try each possible position
                 auto it = route.list_reqs.begin();
                 do {
                     ll newCost = calculateInsertionCost(route, req_id, it);
@@ -376,6 +422,8 @@ class PDPSolver {
                 Route &route = currentSolution[bestRoute];
                 route.list_reqs.insert(bestPosition, req_id);
                 route.cost = bestCost;
+                isRequestRemoved[req_id] = false;
+                updateRequestContext(req_id, route, bestPosition);
             }
         }
     }
@@ -428,7 +476,8 @@ class PDPSolver {
 
     void solve() {
         auto start_time = chrono::high_resolution_clock::now();
-
+        // Initialize removal status
+        std::fill(isRequestRemoved.begin(), isRequestRemoved.end(), true);
         insertRequests(requestIdx);
 
         double currentTemp = temperature;
@@ -476,11 +525,12 @@ class PDPSolver {
                 }
             }
 
-            // std::cout << "Iter: " << iter + 1
-            //           << " Cost: " << bestSolutionCost
-            //           << " Total: " << bestTotalCost
-            //           << " Time: " << fixed << setprecision(2) << elapsed_time << "s"
-            //           << " Temp: " << currentTemp << endl;
+            // if (iter % 100 == 0)
+            //     std::cout << "Iter: " << iter + 1
+            //               << " Cost: " << bestSolutionCost
+            //               << " Total: " << bestTotalCost
+            //               << " Time: " << fixed << setprecision(2) << elapsed_time << "s"
+            //               << " Temp: " << currentTemp << endl;
 
             currentTemp *= coolingRate;
             if (elapsed_time >= 26)
@@ -627,7 +677,7 @@ int main() {
     std::cout.tie(NULL);
     // freopen("tc/6/inp.txt", "r", stdin);
 
-    IO io(100000, 100000, 0);
+    IO io(100000, 1000000, 0);
     io.input();
     io.output();
 
