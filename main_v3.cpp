@@ -1,171 +1,81 @@
 #include <bits/stdc++.h>
-using namespace std;
-
 typedef long int ll;
 
-class HungarianMatching {
+struct Edge {
+    int u, v;
+    ll weight;
+
+    Edge(int u, int v, ll weight) : u(u), v(v), weight(weight) {}
+
+    // Operator for sorting edges by weight
+    bool operator<(const Edge &other) const {
+        return weight > other.weight; // Use > for min-heap
+    }
+};
+
+class MinWeightMatching {
   private:
-    std::vector<std::vector<int>> cost_matrix;
-    std::vector<int> lx, ly; // Labels for X and Y vertices
-    std::vector<int> xy, yx; // Matching pairs (xy[v1] = v2, yx[v2] = v1)
-    std::vector<bool> S, T;  // Sets for alternating tree
-    std::vector<int> slack;  // Slack variables
-    std::vector<int> slackx; // Vertices giving slack
-    int n;                   // Matrix size
-    const int INF = std::numeric_limits<int>::max();
-
-    void init_labels() {
-        lx.assign(n, 0);
-        ly.assign(n, 0);
-        for (int x = 0; x < n; x++) {
-            for (int y = 0; y < n; y++) {
-                lx[x] = std::max(lx[x], cost_matrix[x][y]);
-            }
-        }
-    }
-
-    void update_labels() {
-        int delta = INF;
-        for (int y = 0; y < n; y++) {
-            if (!T[y])
-                delta = std::min(delta, slack[y]);
-        }
-
-        for (int x = 0; x < n; x++) {
-            if (S[x])
-                lx[x] -= delta;
-        }
-        for (int y = 0; y < n; y++) {
-            if (T[y])
-                ly[y] += delta;
-            else
-                slack[y] -= delta;
-        }
-    }
-
-    void add_to_tree(int x, int prevx) {
-        S[x] = true;
-        for (int y = 0; y < n; y++) {
-            if (lx[x] + ly[y] - cost_matrix[x][y] < slack[y]) {
-                slack[y] = lx[x] + ly[y] - cost_matrix[x][y];
-                slackx[y] = x;
-            }
-        }
-    }
-
-    bool augment() {
-        if (n == 0)
-            return true;
-
-        int x, y, root;
-        std::vector<int> q(n), prev(n, -1);
-
-        S.assign(n, false);
-        T.assign(n, false);
-        for (int x = 0; x < n; x++) {
-            if (xy[x] == -1) {
-                q[0] = x;
-                root = x;
-                prev[x] = -2;
-                S[x] = true;
-                break;
-            }
-        }
-
-        slack.assign(n, INF);
-        slackx.assign(n, 0);
-
-        for (int y = 0; y < n; y++) {
-            slack[y] = lx[root] + ly[y] - cost_matrix[root][y];
-            slackx[y] = root;
-        }
-
-        int wr = 1;
-        int rd = 0;
-
-        while (true) {
-            while (rd < wr) {
-                x = q[rd++];
-                for (y = 0; y < n; y++) {
-                    if (cost_matrix[x][y] < lx[x] + ly[y])
-                        continue;
-                    if (!T[y]) {
-                        if (yx[y] == -1)
-                            break;
-                        T[y] = true;
-                        q[wr++] = yx[y];
-                        add_to_tree(yx[y], x);
-                    }
-                }
-                if (y < n)
-                    break;
-            }
-            if (y < n)
-                break;
-
-            update_labels();
-
-            wr = rd = 0;
-            for (y = 0; y < n; y++) {
-                if (!T[y] && slack[y] == 0) {
-                    if (yx[y] == -1) {
-                        x = slackx[y];
-                        break;
-                    }
-                    T[y] = true;
-                    if (!S[yx[y]]) {
-                        q[wr++] = yx[y];
-                        add_to_tree(yx[y], slackx[y]);
-                    }
-                }
-            }
-            if (y < n)
-                break;
-        }
-
-        if (y < n) {
-            int ty;
-            while (x != -2) {
-                ty = y;
-                y = xy[x];
-                yx[ty] = x;
-                xy[x] = ty;
-                x = prev[x];
-            }
-            return true;
-        }
-        return false;
-    }
+    std::vector<std::vector<ll>> graph;
+    int n; // number of nodes
 
   public:
-    HungarianMatching(const std::vector<std::vector<int>> &costs)
-        : cost_matrix(costs), n(costs.size()) {
-        lx.resize(n);
-        ly.resize(n);
-        xy.assign(n, -1);
-        yx.assign(n, -1);
+    MinWeightMatching(const std::vector<std::vector<ll>> &adjacency_matrix)
+        : graph(adjacency_matrix), n(adjacency_matrix.size()) {
+        if (n % 2 != 0) {
+            throw runtime_error("Graph must have even number of nodes for perfect matching");
+        }
     }
 
-    std::pair<std::vector<std::pair<int, int>>, int> solve() {
-        init_labels();
+    std::vector<std::pair<int, int>> findMinWeightMatching() {
+        // Priority queue to store edges sorted by weight
+        std::priority_queue<Edge> edges;
 
+        // Add all edges to priority queue
         for (int i = 0; i < n; i++) {
-            while (!augment()) {
-                update_labels();
+            for (int j = i + 1; j < n; j++) {
+                edges.push(Edge(i, j, graph[i][j]));
             }
         }
 
-        // Collect results
-        int total_weight = 0;
-        std::vector<std::pair<int, int>> matching;
-        for (int i = 0; i < n; i++) {
-            if (xy[i] != -1) {
-                matching.push_back({i, xy[i]});
-                total_weight += cost_matrix[i][xy[i]];
+        // Keep track of matched nodes
+        std::set<int> matched;
+        std::vector<std::pair<int, int>> matches;
+
+        // Greedily match nodes using smallest available edges
+        while (!edges.empty() && matched.size() < n) {
+            Edge e = edges.top();
+            edges.pop();
+
+            // If both nodes are unmatched, match them
+            if (matched.find(e.u) == matched.end() &&
+                matched.find(e.v) == matched.end()) {
+                matched.insert(e.u);
+                matched.insert(e.v);
+                matches.push_back({e.u, e.v});
             }
         }
 
-        return {matching, total_weight};
+        return matches;
+    }
+
+    void printMatchingStats(const std::vector<std::pair<int, int>> &matches) {
+        ll total_weight = 0;
+        ll max_weight = -1;
+
+        std::cout << "Matches:\n";
+        for (const auto &match : matches) {
+            int u = match.first;
+            int v = match.second;
+            ll weight = graph[u][v];
+
+            total_weight += weight;
+            max_weight = max(max_weight, weight);
+
+            std::cout << "(" << u << "," << v << ") weight: " << weight << "\n";
+        }
+
+        std::cout << "Total weight: " << total_weight << "\n";
+        std::cout << "Maximum edge weight: " << max_weight << "\n";
     }
 };
 
@@ -237,8 +147,10 @@ struct RequestContext {
 std::array<std::array<ll, MAX_POINT>, MAX_POINT> distances;
 std::array<int, MAX_VEHICLES> vehicleDepots;
 std::array<Route, MAX_VEHICLES> currentSolution;
-std::vector<Request> requestTwenty;
-std::vector<Request> requestForty;
+std::vector<Request> requestTwentyFt;
+std::vector<Request> requestFortyFt;
+std::array<RequestContext, MAX_REQUESTS> requestContexts;
+std::array<bool, MAX_REQUESTS> isRequestRemoved;
 
 struct IO {
     std::vector<int> requestIdx;
@@ -308,25 +220,61 @@ struct IO {
                 drop_duration};
             requestIdx.push_back(id);
             if (size == 20)
-                requestTwenty.push_back(request);
+                requestTwentyFt.push_back(request);
             else
-                requestForty.push_back(request);
+                requestFortyFt.push_back(request);
         }
     }
 
-    void output() {
+    ll getDistance(int from, int to) {
+        return distances[from][to];
+    }
+
+    ll calculateRequestTransitionCost(const Request &curr_req, const Request &next_req) {
+        if (curr_req.drop_action == DROP_CONTAINER && next_req.pickup_action == PICKUP_CONTAINER_TRAILER)
+            return getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
+        if (curr_req.drop_action == DROP_CONTAINER_TRAILER && next_req.pickup_action == PICKUP_CONTAINER)
+            return getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
+        return getDistance(curr_req.drop_point, next_req.pickup_point);
+    }
+
+    ll calculateTwentyFtCombinationCost(const Request &req1, const Request &req2){
+        ll cost_1 = calculateRequestTransitionCost(req1, req2); // pickup 1 -> drop 1 -> pickup 2 -> drop 2
+        ll cost_2 = calculateRequestTransitionCost(req2, req1); // pickup 2 -> drop 2 -> pickup 1 -> drop 1
+        // pickup 1 -> pickup 2 -> drop 1 -> drop 2
+        // pickup 1 -> pickup 2 -> drop 2 -> drop 1
+        // pickup 2 -> pickup 1 -> drop 1 -> drop 2
+        // pickup 2 -> pickup 1 -> drop 2 -> drop 1
+    }
+
+    void pairMatching() {
+        int num_of_nodes = requestTwentyFt.size();
+        std::vector<std::vector<ll>> graph(num_of_nodes, std::vector<ll>(num_of_nodes, 0));
+        for (int i = 0; i < num_of_nodes; i++)
+            for (int j = i + 1; j < num_of_nodes; j++) {
+
+            }
     }
 };
 
+// Example usage
 int main() {
-    std::ios_base::sync_with_stdio(false);
-    std::cin.tie(NULL);
-    std::cout.tie(NULL);
-    // freopen("tc/6/inp.txt", "r", stdin);
+    // Example graph with 4 nodes
+    int num_of_nodes = requestTwentyFt.size();
+    std::vector<std::vector<ll>> graph(num_of_nodes, std::vector<ll>(num_of_nodes, 0));
 
-    IO io(100000, 1000000, 0);
-    io.input();
-    io.output();
+    for (int i = 0; i < num_of_nodes; i++)
+        for (int j = i + 1; j < num_of_nodes; j++) {
+        }
+
+    try {
+        MinWeightMatching matcher(graph);
+        auto matches = matcher.findMinWeightMatching();
+        matcher.printMatchingStats(matches);
+    } catch (const exception &e) {
+        cerr << "Error: " << e.what() << endl;
+        return 1;
+    }
 
     return 0;
 }
