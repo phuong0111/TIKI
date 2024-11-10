@@ -16,17 +16,16 @@ struct Edge {
 class MinWeightMatching {
   private:
     std::vector<std::vector<ll>> graph;
-    int n; // number of nodes
+    int n; // Original number of nodes
 
   public:
     MinWeightMatching(const std::vector<std::vector<ll>> &adjacency_matrix)
-        : graph(adjacency_matrix), n(adjacency_matrix.size()) {
-        if (n % 2 != 0) {
-            throw runtime_error("Graph must have even number of nodes for perfect matching");
-        }
-    }
+        : graph(adjacency_matrix), n(adjacency_matrix.size()) {}
 
-    std::vector<std::pair<int, int>> findMinWeightMatching() {
+    // Returns {matches, remaining_node_id}, where remaining_node_id is -1 if none
+    std::pair<std::vector<std::pair<int, int>>, int> findMinWeightMatching() {
+        std::vector<std::pair<int, int>> matches;
+
         // Priority queue to store edges sorted by weight
         std::priority_queue<Edge> edges;
 
@@ -39,26 +38,37 @@ class MinWeightMatching {
 
         // Keep track of matched nodes
         std::set<int> matched;
-        std::vector<std::pair<int, int>> matches;
+        bool is_odd = (n % 2 != 0);
 
         // Greedily match nodes using smallest available edges
-        while (!edges.empty() && matched.size() < n) {
+        while (!edges.empty() && matched.size() < n - (is_odd ? 1 : 0)) {
             Edge e = edges.top();
             edges.pop();
 
             // If both nodes are unmatched, match them
             if (matched.find(e.u) == matched.end() &&
                 matched.find(e.v) == matched.end()) {
+                matches.push_back({e.u, e.v});
                 matched.insert(e.u);
                 matched.insert(e.v);
-                matches.push_back({e.u, e.v});
             }
         }
 
-        return matches;
+        // Find remaining node if odd number of nodes
+        int remaining_node = -1;
+        if (is_odd) {
+            for (int i = 0; i < n; i++) {
+                if (matched.find(i) == matched.end()) {
+                    remaining_node = i;
+                    break;
+                }
+            }
+        }
+
+        return {matches, remaining_node};
     }
 
-    void printMatchingStats(const std::vector<std::pair<int, int>> &matches) {
+    void printMatchingStats(const std::vector<std::pair<int, int>> &matches, int remaining_node = -1) {
         ll total_weight = 0;
         ll max_weight = -1;
 
@@ -69,9 +79,13 @@ class MinWeightMatching {
             ll weight = graph[u][v];
 
             total_weight += weight;
-            max_weight = max(max_weight, weight);
+            max_weight = std::max(max_weight, weight);
 
             std::cout << "(" << u << "," << v << ") weight: " << weight << "\n";
+        }
+
+        if (remaining_node != -1) {
+            std::cout << "Remaining unmatched node: " << remaining_node << "\n";
         }
 
         std::cout << "Total weight: " << total_weight << "\n";
@@ -151,6 +165,8 @@ std::vector<Request> requestTwentyFt;
 std::vector<Request> requestFortyFt;
 std::array<RequestContext, MAX_REQUESTS> requestContexts;
 std::array<bool, MAX_REQUESTS> isRequestRemoved;
+std::vector<std::vector<ll>> graphWeight;
+std::vector<std::vector<int>> combinationType;
 
 struct IO {
     std::vector<int> requestIdx;
@@ -238,43 +254,128 @@ struct IO {
         return getDistance(curr_req.drop_point, next_req.pickup_point);
     }
 
-    ll calculateTwentyFtCombinationCost(const Request &req1, const Request &req2){
-        ll cost_1 = calculateRequestTransitionCost(req1, req2); // pickup 1 -> drop 1 -> pickup 2 -> drop 2
-        ll cost_2 = calculateRequestTransitionCost(req2, req1); // pickup 2 -> drop 2 -> pickup 1 -> drop 1
-        // pickup 1 -> pickup 2 -> drop 1 -> drop 2
-        // pickup 1 -> pickup 2 -> drop 2 -> drop 1
-        // pickup 2 -> pickup 1 -> drop 1 -> drop 2
-        // pickup 2 -> pickup 1 -> drop 2 -> drop 1
+    ll calculateRequestContextCost(const Request &req) {
+        return req.pickup_duration + req.drop_duration + getDistance(req.pickup_point, req.drop_point);
+    }
+
+    std::pair<ll, int> calculateTwentyFtCombinationCost(const Request &req1, const Request &req2) {
+        // Pre-calculate common values to avoid duplication
+        ll req1_self_cost = req1.pickup_duration + req1.drop_duration;
+        ll req2_self_cost = req2.pickup_duration + req2.drop_duration;
+        ll total_durations = req1_self_cost + req2_self_cost;
+
+        // Pre-calculate common distances
+        ll dist_p1_p2 = getDistance(req1.pickup_point, req2.pickup_point);
+        ll dist_p1_d1 = getDistance(req1.pickup_point, req1.drop_point);
+        ll dist_p2_p1 = getDistance(req2.pickup_point, req1.pickup_point);
+        ll dist_p2_d2 = getDistance(req2.pickup_point, req2.drop_point);
+        ll dist_d1_d2 = getDistance(req1.drop_point, req2.drop_point);
+        ll dist_p2_d1 = getDistance(req2.pickup_point, req1.drop_point);
+        ll dist_p1_d2 = getDistance(req1.pickup_point, req2.drop_point);
+        ll dist_d2_d1 = getDistance(req2.drop_point, req1.drop_point);
+
+        std::vector<std::pair<ll, int>> combinations;
+
+        // Sequential combinations (always possible)
+        // 1. p1->d1->p2->d2 (pattern: 0011)
+        combinations.push_back({req1_self_cost + req2_self_cost +
+                                    dist_p1_d1 +
+                                    calculateRequestTransitionCost(req1, req2) +
+                                    dist_p2_d2,
+                                0b0011});
+
+        // 2. p2->d2->p1->d1 (pattern: 1100)
+        combinations.push_back({req1_self_cost + req2_self_cost +
+                                    dist_p2_d2 +
+                                    calculateRequestTransitionCost(req2, req1) +
+                                    dist_p1_d1,
+                                0b1100});
+
+        // Nested combinations (only if conditions met)
+        bool can_nest_1 = (req2.pickup_action == PICKUP_CONTAINER);
+        bool can_nest_2 = (req1.pickup_action == PICKUP_CONTAINER);
+
+        if (can_nest_1) {
+            // 3. p1->p2->d1->d2 (pattern: 0101)
+            if (req1.drop_action == DROP_CONTAINER) {
+                combinations.push_back({total_durations +
+                                            dist_p1_p2 +
+                                            dist_p2_d1 +
+                                            dist_d1_d2,
+                                        0b0101});
+            }
+            // 4. p1->p2->d2->d1 (pattern: 0110)
+            if (req2.drop_action == DROP_CONTAINER) {
+                combinations.push_back({total_durations +
+                                            dist_p1_p2 +
+                                            dist_p2_d2 +
+                                            dist_d2_d1,
+                                        0b0110});
+            }
+        }
+
+        if (can_nest_2) {
+            // 5. p2->p1->d1->d2 (pattern: 1001)
+            if (req1.drop_action == DROP_CONTAINER) {
+                combinations.push_back({total_durations +
+                                            dist_p2_p1 +
+                                            dist_p1_d1 +
+                                            dist_d1_d2,
+                                        0b1001});
+            }
+            // 6. p2->p1->d2->d1 (pattern: 1010)
+            if (req2.drop_action == DROP_CONTAINER) {
+                combinations.push_back({total_durations +
+                                            dist_p2_p1 +
+                                            dist_p1_d2 +
+                                            dist_d2_d1,
+                                        0b1010});
+            }
+        }
+
+        // Return the combination with maximum cost
+        return *min_element(combinations.begin(), combinations.end());
     }
 
     void pairMatching() {
         int num_of_nodes = requestTwentyFt.size();
-        std::vector<std::vector<ll>> graph(num_of_nodes, std::vector<ll>(num_of_nodes, 0));
-        for (int i = 0; i < num_of_nodes; i++)
-            for (int j = i + 1; j < num_of_nodes; j++) {
+        graphWeight.clear();
+        graphWeight = std::vector<std::vector<ll>>(num_of_nodes, std::vector<ll>(num_of_nodes, 0));
+        combinationType.clear();
+        combinationType = std::vector<std::vector<int>>(num_of_nodes, std::vector<int>(num_of_nodes, 0));
 
+        // Build the graph
+        for (int i = 0; i < num_of_nodes; i++) {
+            for (int j = i + 1; j < num_of_nodes; j++) {
+                auto cost_combination = calculateTwentyFtCombinationCost(requestTwentyFt[i], requestTwentyFt[j]);
+                graphWeight[i][j] = cost_combination.first;
+                graphWeight[j][i] = cost_combination.first;
+                combinationType[i][j] = cost_combination.second;
+                combinationType[j][i] = cost_combination.second;
             }
+        }
+
+        MinWeightMatching matcher(graphWeight);
+        auto [matches, remaining_node] = matcher.findMinWeightMatching();
+        matcher.printMatchingStats(matches, remaining_node);
+
+        // Handle the remaining node if needed
+        if (remaining_node != -1) {
+            // Process requestTwentyFt[remaining_node] separately
+        }
     }
 };
 
 // Example usage
 int main() {
-    // Example graph with 4 nodes
-    int num_of_nodes = requestTwentyFt.size();
-    std::vector<std::vector<ll>> graph(num_of_nodes, std::vector<ll>(num_of_nodes, 0));
+    std::ios_base::sync_with_stdio(false);
+    std::cin.tie(NULL);
+    std::cout.tie(NULL);
+    freopen("tc/1/inp.txt", "r", stdin);
 
-    for (int i = 0; i < num_of_nodes; i++)
-        for (int j = i + 1; j < num_of_nodes; j++) {
-        }
-
-    try {
-        MinWeightMatching matcher(graph);
-        auto matches = matcher.findMinWeightMatching();
-        matcher.printMatchingStats(matches);
-    } catch (const exception &e) {
-        cerr << "Error: " << e.what() << endl;
-        return 1;
-    }
+    IO io(100000, 1000000, 0);
+    io.input();
+    io.pairMatching();
 
     return 0;
 }
