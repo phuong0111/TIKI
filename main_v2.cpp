@@ -525,12 +525,12 @@ class PDPSolver {
                 }
             }
 
-            // if (iter % 100 == 0)
-            //     std::cout << "Iter: " << iter + 1
-            //               << " Cost: " << bestSolutionCost
-            //               << " Total: " << bestTotalCost
-            //               << " Time: " << fixed << setprecision(2) << elapsed_time << "s"
-            //               << " Temp: " << currentTemp << endl;
+            if (iter % 100 == 0)
+                std::cout << "Iter: " << iter + 1
+                          << " Cost: " << bestSolutionCost
+                          << " Total: " << bestTotalCost
+                          << " Time: " << fixed << setprecision(2) << elapsed_time << "s"
+                          << " Temp: " << currentTemp << endl;
 
             currentTemp *= coolingRate;
             if (elapsed_time >= 26)
@@ -660,7 +660,7 @@ struct IO {
                          trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
-        // freopen("tc/6/out.txt", "w", stdout);
+        freopen("tc/6/out.txt", "w", stdout);
 
         std::array<Route, MAX_VEHICLES> solution = solver.getSolution();
         std::cout << "ROUTES " << num_vehicles << std::endl;
@@ -675,7 +675,7 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    // freopen("tc/6/inp.txt", "r", stdin);
+    freopen("tc/6/inp.txt", "r", stdin);
 
     IO io(100000, 1000000, 0);
     io.input();
