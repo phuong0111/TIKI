@@ -163,6 +163,7 @@ std::array<int, MAX_VEHICLES> vehicleDepots;
 std::array<Route, MAX_VEHICLES> currentSolution;
 std::vector<Request> requestTwentyFt;
 std::vector<Request> requestFortyFt;
+std::array<Request, MAX_REQUESTS> requests;
 std::array<RequestContext, MAX_REQUESTS> requestContexts;
 std::array<bool, MAX_REQUESTS> isRequestRemoved;
 std::vector<std::vector<ll>> graphWeight;
@@ -337,7 +338,7 @@ struct IO {
         return *min_element(combinations.begin(), combinations.end());
     }
 
-    void pairMatching() {
+    std::pair<std::vector<std::pair<int, int>>, int> pairMatching() {
         int num_of_nodes = requestTwentyFt.size();
         graphWeight.clear();
         graphWeight = std::vector<std::vector<ll>>(num_of_nodes, std::vector<ll>(num_of_nodes, 0));
@@ -358,10 +359,21 @@ struct IO {
         MinWeightMatching matcher(graphWeight);
         auto [matches, remaining_node] = matcher.findMinWeightMatching();
         matcher.printMatchingStats(matches, remaining_node);
+        // // Handle the remaining node if needed
+        // if (remaining_node != -1) {
+        //     // Process requestTwentyFt[remaining_node] separately
+        // }
+        return {matches, remaining_node};
+    }
 
-        // Handle the remaining node if needed
-        if (remaining_node != -1) {
-            // Process requestTwentyFt[remaining_node] separately
+    void combineRequest(std::pair<std::vector<std::pair<int, int>>, int> matched_pair) {
+        int i = 0;
+        Request req1, req2;
+        int pickup_point, drop_point;
+        Action pickup_action, drop_action;
+        for (auto x : matched_pair.first) {
+            req1 = requestTwentyFt[x.first];
+            req2 = requestTwentyFt[x.second];
         }
     }
 };
@@ -371,7 +383,7 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    freopen("tc/1/inp.txt", "r", stdin);
+    freopen("tc/6/inp.txt", "r", stdin);
 
     IO io(100000, 1000000, 0);
     io.input();
