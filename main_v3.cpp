@@ -1424,7 +1424,7 @@ public:
         }
         return {matches, remaining_node};
     }
-    ContainerSize getContaierSize(int size)
+    ContainerSize getContainerSize(int size)
     {
         return size == 20 ? TWENTY_FT : FORTY_FT;
     }
@@ -1490,10 +1490,10 @@ public:
             }
             Request request = {
                 ++n_new,
-                getContaierSize(40),
+                getContainerSize(40),
                 pickup_point,
                 pickup_action,
-                graphWeight[u][v],
+                graphWeight[u][v] - distances[pickup_point][drop_point],
                 drop_point,
                 drop_action,
                 0};
@@ -1551,7 +1551,7 @@ struct IO
         return DROP_CONTAINER_TRAILER;
     }
 
-    ContainerSize getContaierSize(int size)
+    ContainerSize getContainerSize(int size)
     {
         return size == 20 ? TWENTY_FT : FORTY_FT;
     }
@@ -1590,7 +1590,7 @@ struct IO
             // cout << id << endl;
             Request request = {
                 id,
-                getContaierSize(size),
+                getContainerSize(size),
                 pickup_point,
                 getAction(pickup_action),
                 pickup_duration,
