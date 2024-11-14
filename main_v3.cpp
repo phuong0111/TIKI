@@ -697,7 +697,7 @@ public:
             double elapsed_time = chrono::duration_cast<chrono::milliseconds>(current_time - start_time).count() / 1000.0;
             if (elapsed_time >= 29)
                 break;
-            int numToRemove = max(2, min(40, static_cast<int>(0.1 + (0.4 * (rand() % 100) / 100.0) * requestIdx.size())));
+            int numToRemove = max(2, min(40, static_cast<int>(0.1 + (0.3 * (rand() % 100) / 100.0) * requestIdx.size())));
 
             vector<int> removedRequests;
             removeRandomRequests(removedRequests, numToRemove);
