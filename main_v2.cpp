@@ -274,6 +274,7 @@ class PDPSolver {
         ll transitionCost = 0;
 
         if (it == route.list_reqs.begin()) {
+            std::cout << "check begin\n";
             // First request
             transitionCost += calculateDepotToRequestCost(route.depot, curr_req);
             if (std::next(it) != route.list_reqs.end()) {
@@ -287,11 +288,13 @@ class PDPSolver {
             const Request &prev_req = requests[*std::prev(it)];
 
             if (std::next(it) == route.list_reqs.end()) {
+                std::cout << "check end\n";
                 // Last request
                 transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
                 transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
                 transitionCost -= calculateRequestToDepotCost(prev_req, route.depot);
             } else {
+                std::cout << "check middle\n";
                 // Middle request
                 const Request &next_req = requests[*std::next(it)];
                 transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
@@ -320,14 +323,16 @@ class PDPSolver {
 
         // Calculate selection probabilities for routes
         std::vector<double> probabilities(routeCosts.size());
-        int k = std::min(static_cast<int>(routeCosts.size()), std::max(2, max_attempt / 4));
+        int k = 0;
+        // int k = std::min(static_cast<int>(routeCosts.size()), std::max(2, max_attempt / 4));
 
         for (size_t i = 0; i < routeCosts.size(); i++) {
             probabilities[i] = (i < k) ? 0.8 / k : 0.2 / (routeCosts.size() - k);
         }
 
         int attempt = 0;
-        while (requestsToRemove.size() < max_attempt) {
+        while (attempt < max_attempt) {
+        // while (requestsToRemove.size() < max_attempt) {
             std::discrete_distribution<> routeDist(probabilities.begin(), probabilities.end());
             int routeIdx = routeCosts[routeDist(gen)].second;
             Route &route = currentSolution[routeIdx];
@@ -411,7 +416,6 @@ class PDPSolver {
                         bestRoute = routeIdx;
                         bestPosition = it;
                     }
-
                     if (it == route.list_reqs.end())
                         break;
                     ++it;
@@ -420,10 +424,20 @@ class PDPSolver {
 
             if (bestRoute != -1) {
                 Route &route = currentSolution[bestRoute];
-                route.list_reqs.insert(bestPosition, req_id);
+                bestPosition = route.list_reqs.insert(bestPosition, req_id);
                 route.cost = bestCost;
                 isRequestRemoved[req_id] = false;
-                updateRequestContext(req_id, route, bestPosition);
+                requestContexts[req_id].position = bestPosition;
+                // updateRequestContext(req_id, route, bestPosition);
+            }
+        }
+    }
+
+    void updateRequestContextAfterInsert(const std::vector<int> &requestIds) {
+        for (int req_id : requestIds) {
+            if (!isRequestRemoved[req_id]) {
+                Route &route = currentSolution[requestContexts[req_id].routeIdx];
+                updateRequestContext(req_id, route, requestContexts[req_id].position);
             }
         }
     }
@@ -660,7 +674,7 @@ struct IO {
                          trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
-        freopen("tc/6/out.txt", "w", stdout);
+        freopen("tc/1/out.txt", "w", stdout);
 
         std::array<Route, MAX_VEHICLES> solution = solver.getSolution();
         std::cout << "ROUTES " << num_vehicles << std::endl;
@@ -669,17 +683,33 @@ struct IO {
             output_route(solution[i]);
         }
     }
+
+    void test() {
+        std::cout << "TEST" << std::endl;
+        PDPSolver solver(requestIdx, num_vehicles, alpha, trailer_point,
+                         trailer_pickup_time, max_iterations, verbose);
+        std::vector<int> requestIdx = {1, 2};
+        solver.insertRequests(requestIdx);
+        solver.updateRequestContextAfterInsert(requestIdx);
+        auto solution = solver.getSolution();
+        output_route(solution[0]);
+        output_route(solution[1]);
+        output_route(solution[2]);
+        std::cout << requestContexts[1].selfCost << " " << requestContexts[1].transitionCost << "\n";
+        std::cout << requestContexts[2].selfCost << " " << requestContexts[2].transitionCost << "\n";
+    }
 };
 
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    freopen("tc/6/inp.txt", "r", stdin);
+    freopen("tc/4/inp.txt", "r", stdin);
 
-    IO io(100000, 1000000, 0);
+    IO io(100000, 10, 0);
     io.input();
-    io.output();
+    // io.output();
+    io.test();
 
     return 0;
 }

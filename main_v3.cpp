@@ -616,7 +616,7 @@ public:
             if (bestRoute != -1)
             {
                 Route &route = currentSolution[bestRoute];
-                route.list_reqs.insert(bestPosition, req_id);
+                bestPosition = route.list_reqs.insert(bestPosition, req_id);
                 route.cost = bestCost;
                 isRequestRemoved[req_id] = false;
                 updateRequestContext(req_id, route, bestPosition);
