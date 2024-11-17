@@ -360,12 +360,15 @@ class PDPSolver {
                 int prevRequestId = -1, nextRequestId = -1;
                 bool hasPrev = currentPos != route.list_reqs.begin();
                 bool hasNext = std::next(currentPos) != route.list_reqs.end();
+                auto prevPos = currentPos, nextPos = currentPos;
 
                 if (hasPrev) {
-                    prevRequestId = *std::prev(currentPos);
+                    prevPos = std::prev(currentPos);
+                    prevRequestId = *prevPos;
                 }
                 if (hasNext) {
-                    nextRequestId = *std::next(currentPos);
+                    nextPos = std::next(currentPos);
+                    nextRequestId = *nextPos;
                 }
 
                 // Remove request
@@ -374,17 +377,11 @@ class PDPSolver {
                 isRequestRemoved[selectedRequestId] = true;
 
                 // Update contexts of adjacent requests after removal
-                if (hasPrev && hasNext) {
-                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), prevRequestId);
-                    updateRequestContext(prevRequestId, route, it);
-                    it = std::find(route.list_reqs.begin(), route.list_reqs.end(), nextRequestId);
-                    updateRequestContext(nextRequestId, route, it);
-                } else if (hasPrev) {
-                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), prevRequestId);
-                    updateRequestContext(prevRequestId, route, it);
-                } else if (hasNext) {
-                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), nextRequestId);
-                    updateRequestContext(nextRequestId, route, it);
+                if (hasPrev) {
+                    updateRequestContext(prevRequestId, route, prevPos);
+                } 
+                if (hasNext) {
+                    updateRequestContext(nextRequestId, route, nextPos);
                 }
             }
             attempt++;
@@ -525,15 +522,15 @@ class PDPSolver {
                 }
             }
 
-            // if (iter % 100 == 0)
-            //     std::cout << "Iter: " << iter + 1
-            //               << " Cost: " << bestSolutionCost
-            //               << " Total: " << bestTotalCost
-            //               << " Time: " << fixed << setprecision(2) << elapsed_time << "s"
-            //               << " Temp: " << currentTemp << endl;
+            if (iter % 100 == 0)
+                std::cout << "Iter: " << iter + 1
+                          << " Cost: " << bestSolutionCost
+                          << " Total: " << bestTotalCost
+                          << " Time: " << fixed << setprecision(2) << elapsed_time << "s"
+                          << " Temp: " << currentTemp << endl;
 
             currentTemp *= coolingRate;
-            if (elapsed_time >= 26)
+            if (elapsed_time >= 29.50)
                 break;
         }
 
@@ -660,7 +657,7 @@ struct IO {
                          trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
-        // freopen("tc/6/out.txt", "w", stdout);
+        freopen("tc/6/out.txt", "w", stdout);
 
         std::array<Route, MAX_VEHICLES> solution = solver.getSolution();
         std::cout << "ROUTES " << num_vehicles << std::endl;
@@ -675,7 +672,7 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    // freopen("tc/6/inp.txt", "r", stdin);
+    freopen("tc/6/inp.txt", "r", stdin);
 
     IO io(100000, 1000000, 0);
     io.input();
