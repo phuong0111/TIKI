@@ -168,7 +168,6 @@ struct Route1 {
 struct RequestContext {
     int request_id;
     ll transitionCost;                 // Cost of transitions (prev->curr->next)
-    ll selfCost = 0;                   // Cost of request itself (pickup + drop duration)
     int routeIdx;                      // Which route this request is in
     std::list<int>::iterator position; // Position in route
 };
@@ -185,6 +184,11 @@ std::array<bool, MAX_REQUESTS> isRequestRemoved;
 std::vector<std::vector<ll>> graphWeight;
 std::vector<std::vector<int>> combinationType;
 int idx = 0, n_new = 0, n_total = 0;
+
+std::array<std::array<ll, MAX_REQUESTS>, MAX_REQUESTS> transitionCostRequestRequest;
+std::array<std::array<ll, MAX_REQUESTS>, MAX_POINT> transitionCostDepotRequest;
+std::array<std::array<ll, MAX_POINT>, MAX_REQUESTS> transitionCostRequestDepot;
+std::array<ll, MAX_REQUESTS> requestContextCost;
 
 class PDPSolver {
   private:
@@ -207,63 +211,85 @@ class PDPSolver {
         return distances[from][to];
     }
 
-    ll calculateRequestContextCost(const Request &req) {
-        return req.pickup_duration + req.drop_duration + getDistance(req.pickup_point, req.drop_point);
+    ll calculateRequestContextCost(const int &request_id) {
+        if (requestContextCost[request_id] == 0) {
+            const Request &req = requests[request_id];
+            requestContextCost[request_id] = req.pickup_duration + req.drop_duration + getDistance(req.pickup_point, req.drop_point);
+        }
+
+        return requestContextCost[request_id];
     }
 
-    ll calculateDepotToRequestCost(const int &depot, const Request &req) {
-        if (req.pickup_action == PICKUP_CONTAINER)
-            return getDistance(depot, trailer_point) + trailer_pickup_time + getDistance(trailer_point, req.pickup_point);
-        return getDistance(depot, req.pickup_point); // PICKUP_CONTAINER_TRAILER
+    ll calculateDepotToRequestCost(const int &depot, const int &req_id) {
+        if (transitionCostDepotRequest[depot][req_id] == 0) {
+            const Request &req = requests[req_id];
+            if (req.pickup_action == PICKUP_CONTAINER)
+                transitionCostDepotRequest[depot][req_id] = getDistance(depot, trailer_point) + trailer_pickup_time + getDistance(trailer_point, req.pickup_point);
+            else
+                transitionCostDepotRequest[depot][req_id] = getDistance(depot, req.pickup_point); // PICKUP_CONTAINER_TRAILER
+        }
+
+        return transitionCostDepotRequest[depot][req_id];
     }
 
-    ll calculateRequestToDepotCost(const Request &req, const int &depot) {
-        if (req.drop_action == DROP_CONTAINER)
-            return getDistance(req.drop_point, trailer_point) + trailer_pickup_time + getDistance(trailer_point, depot);
-        return getDistance(req.drop_point, depot); // DROP_CONTAINER_TRAILER
+    ll calculateRequestToDepotCost(const int &req_id, const int &depot) {
+        if (transitionCostRequestDepot[req_id][depot] == 0) {
+            const Request &req = requests[req_id];
+            if (req.drop_action == DROP_CONTAINER)
+                transitionCostRequestDepot[req_id][depot] = getDistance(req.drop_point, trailer_point) + trailer_pickup_time + getDistance(trailer_point, depot);
+            else
+                transitionCostRequestDepot[req_id][depot] = getDistance(req.drop_point, depot); // DROP_CONTAINER_TRAILER
+        }
+
+        return transitionCostRequestDepot[req_id][depot];
     }
 
-    ll calculateRequestTransitionCost(const Request &curr_req, const Request &next_req) {
-        if (curr_req.drop_action == DROP_CONTAINER && next_req.pickup_action == PICKUP_CONTAINER_TRAILER)
-            return getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
-        if (curr_req.drop_action == DROP_CONTAINER_TRAILER && next_req.pickup_action == PICKUP_CONTAINER)
-            return getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
-        return getDistance(curr_req.drop_point, next_req.pickup_point);
+    ll calculateRequestTransitionCost(const int &curr_req_id, const int &next_req_id) {
+        if (transitionCostRequestRequest[curr_req_id][next_req_id] == 0) {
+            const Request &curr_req = requests[curr_req_id];
+            const Request &next_req = requests[next_req_id];
+            if ((curr_req.drop_action == DROP_CONTAINER && next_req.pickup_action == PICKUP_CONTAINER_TRAILER) ||
+                (curr_req.drop_action == DROP_CONTAINER_TRAILER && next_req.pickup_action == PICKUP_CONTAINER))
+                transitionCostRequestRequest[curr_req_id][next_req_id] = getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
+            else
+                transitionCostRequestRequest[curr_req_id][next_req_id] = getDistance(curr_req.drop_point, next_req.pickup_point);
+        }
+
+        return transitionCostRequestRequest[curr_req_id][next_req_id];
     }
 
     ll calculateInsertionCost(const Route &route, const int request_id, std::list<int>::iterator position) {
-        const Request &req = requests[request_id];
         ll costDelta = 0;
 
         if (route.list_reqs.empty()) {
             // If route is empty, just calculate depot -> request -> depot
-            return calculateDepotToRequestCost(route.depot, req) +
-                   calculateRequestContextCost(req) +
-                   calculateRequestToDepotCost(req, route.depot);
+            return calculateDepotToRequestCost(route.depot, request_id) +
+                   calculateRequestContextCost(request_id) +
+                   calculateRequestToDepotCost(request_id, route.depot);
         }
 
         if (position == route.list_reqs.begin()) {
             // Inserting at start of route
-            const Request &next_req = requests[*position];
-            costDelta = calculateDepotToRequestCost(route.depot, req) +
-                        calculateRequestContextCost(req) +
-                        calculateRequestTransitionCost(req, next_req) -
-                        calculateDepotToRequestCost(route.depot, next_req);
+            const int &next_req_id = *position;
+            costDelta = calculateDepotToRequestCost(route.depot, request_id) +
+                        calculateRequestContextCost(request_id) +
+                        calculateRequestTransitionCost(request_id, next_req_id) -
+                        calculateDepotToRequestCost(route.depot, next_req_id);
         } else if (position == route.list_reqs.end()) {
             // Inserting at end of route
-            const Request &prev_req = requests[*std::prev(position)];
-            costDelta = calculateRequestTransitionCost(prev_req, req) +
-                        calculateRequestContextCost(req) +
-                        calculateRequestToDepotCost(req, route.depot) -
-                        calculateRequestToDepotCost(prev_req, route.depot);
+            const int &prev_req_id = *std::prev(position);
+            costDelta = calculateRequestTransitionCost(prev_req_id, request_id) +
+                        calculateRequestContextCost(request_id) +
+                        calculateRequestToDepotCost(request_id, route.depot) -
+                        calculateRequestToDepotCost(prev_req_id, route.depot);
         } else {
             // Inserting between two existing requests
-            const Request &prev_req = requests[*std::prev(position)];
-            const Request &next_req = requests[*position];
-            costDelta = calculateRequestTransitionCost(prev_req, req) +
-                        calculateRequestContextCost(req) +
-                        calculateRequestTransitionCost(req, next_req) -
-                        calculateRequestTransitionCost(prev_req, next_req);
+            const int &prev_req_id = *std::prev(position);
+            const int &next_req_id = *position;
+            costDelta = calculateRequestTransitionCost(prev_req_id, request_id) +
+                        calculateRequestContextCost(request_id) +
+                        calculateRequestTransitionCost(request_id, next_req_id) -
+                        calculateRequestTransitionCost(prev_req_id, next_req_id);
         }
 
         return route.cost + costDelta;
@@ -274,74 +300,34 @@ class PDPSolver {
         if (it == route.list_reqs.end())
             return route.cost; // Request not found
 
-        const Request &req = requests[request_id];
-        ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
+        ll costDelta = -calculateRequestContextCost(request_id); // Remove request's own cost
 
         if (route.list_reqs.size() == 1) {
             // If this is the only request
-            costDelta -= calculateDepotToRequestCost(route.depot, req);
-            costDelta -= calculateRequestToDepotCost(req, route.depot);
+            costDelta -= calculateDepotToRequestCost(route.depot, request_id);
+            costDelta -= calculateRequestToDepotCost(request_id, route.depot);
             return 0; // Route will be empty
         }
 
         if (it == route.list_reqs.begin()) {
             // If removing first request
-            const Request &next_req = requests[*std::next(it)];
-            costDelta -= calculateDepotToRequestCost(route.depot, req);
-            costDelta -= calculateRequestTransitionCost(req, next_req);
-            costDelta += calculateDepotToRequestCost(route.depot, next_req);
+            const int &next_req_id = *std::next(it);
+            costDelta -= calculateDepotToRequestCost(route.depot, request_id);
+            costDelta -= calculateRequestTransitionCost(request_id, next_req_id);
+            costDelta += calculateDepotToRequestCost(route.depot, next_req_id);
         } else if (std::next(it) == route.list_reqs.end()) {
             // If removing last request
-            const Request &prev_req = requests[*std::prev(it)];
-            costDelta -= calculateRequestTransitionCost(prev_req, req);
-            costDelta -= calculateRequestToDepotCost(req, route.depot);
-            costDelta += calculateRequestToDepotCost(prev_req, route.depot);
+            const int &prev_req_id = *std::prev(it);
+            costDelta -= calculateRequestTransitionCost(prev_req_id, request_id);
+            costDelta -= calculateRequestToDepotCost(request_id, route.depot);
+            costDelta += calculateRequestToDepotCost(prev_req_id, route.depot);
         } else {
             // If removing from middle
-            const Request &prev_req = requests[*std::prev(it)];
-            const Request &next_req = requests[*std::next(it)];
-            costDelta -= calculateRequestTransitionCost(prev_req, req);
-            costDelta -= calculateRequestTransitionCost(req, next_req);
-            costDelta += calculateRequestTransitionCost(prev_req, next_req);
-        }
-
-        return route.cost + costDelta;
-    }
-
-    ll calculateRemovalCost(Route &route, std::list<int>::iterator it) {
-        if (it == route.list_reqs.end())
-            return route.cost; // Request not found
-
-        auto request_id = *it;
-        const Request &req = requests[request_id];
-        ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
-
-        if (route.list_reqs.size() == 1) {
-            // If this is the only request
-            costDelta -= calculateDepotToRequestCost(route.depot, req);
-            costDelta -= calculateRequestToDepotCost(req, route.depot);
-            return 0; // Route will be empty
-        }
-
-        if (it == route.list_reqs.begin()) {
-            // If removing first request
-            const Request &next_req = requests[*std::next(it)];
-            costDelta -= calculateDepotToRequestCost(route.depot, req);
-            costDelta -= calculateRequestTransitionCost(req, next_req);
-            costDelta += calculateDepotToRequestCost(route.depot, next_req);
-        } else if (std::next(it) == route.list_reqs.end()) {
-            // If removing last request
-            const Request &prev_req = requests[*std::prev(it)];
-            costDelta -= calculateRequestTransitionCost(prev_req, req);
-            costDelta -= calculateRequestToDepotCost(req, route.depot);
-            costDelta += calculateRequestToDepotCost(prev_req, route.depot);
-        } else {
-            // If removing from middle
-            const Request &prev_req = requests[*std::prev(it)];
-            const Request &next_req = requests[*std::next(it)];
-            costDelta -= calculateRequestTransitionCost(prev_req, req);
-            costDelta -= calculateRequestTransitionCost(req, next_req);
-            costDelta += calculateRequestTransitionCost(prev_req, next_req);
+            const int &prev_req_id = *std::prev(it);
+            const int &next_req_id = *std::next(it);
+            costDelta -= calculateRequestTransitionCost(prev_req_id, request_id);
+            costDelta -= calculateRequestTransitionCost(request_id, next_req_id);
+            costDelta += calculateRequestTransitionCost(prev_req_id, next_req_id);
         }
 
         return route.cost + costDelta;
@@ -353,17 +339,6 @@ class PDPSolver {
 
         // Remove the request
         route.list_reqs.remove(request_id);
-
-        // Update route cost
-        route.cost = newCost;
-    }
-
-    void removeStopsByRequestIt(Route &route, std::list<int>::iterator it) {
-        // Calculate new cost before modifying the list
-        ll newCost = calculateRemovalCost(route, it);
-
-        // Remove the request
-        route.list_reqs.erase(it);
 
         // Update route cost
         route.cost = newCost;
@@ -428,36 +403,33 @@ class PDPSolver {
         context.routeIdx = &route - &currentSolution[0];
         context.position = it;
 
-        const Request &curr_req = requests[req_id];
-        // context.selfCost = calculateRequestContextCost(curr_req);
-
         // Calculate transition cost
         ll transitionCost = 0;
 
         if (it == route.list_reqs.begin()) {
             // First request
-            transitionCost += calculateDepotToRequestCost(route.depot, curr_req);
+            transitionCost += calculateDepotToRequestCost(route.depot, req_id);
             if (std::next(it) != route.list_reqs.end()) {
-                const Request &next_req = requests[*std::next(it)];
-                transitionCost += calculateRequestTransitionCost(curr_req, next_req);
-                transitionCost -= calculateDepotToRequestCost(route.depot, next_req);
+                const int &next_req_id = *std::next(it);
+                transitionCost += calculateRequestTransitionCost(req_id, next_req_id);
+                transitionCost -= calculateDepotToRequestCost(route.depot, next_req_id);
             } else {
-                transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
+                transitionCost += calculateRequestToDepotCost(req_id, route.depot);
             }
         } else {
-            const Request &prev_req = requests[*std::prev(it)];
+            const int &prev_req_id = *std::prev(it);
 
             if (std::next(it) == route.list_reqs.end()) {
                 // Last request
-                transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
-                transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
-                transitionCost -= calculateRequestToDepotCost(prev_req, route.depot);
+                transitionCost += calculateRequestTransitionCost(prev_req_id, req_id);
+                transitionCost += calculateRequestToDepotCost(req_id, route.depot);
+                transitionCost -= calculateRequestToDepotCost(prev_req_id, route.depot);
             } else {
                 // Middle request
-                const Request &next_req = requests[*std::next(it)];
-                transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
-                transitionCost += calculateRequestTransitionCost(curr_req, next_req);
-                transitionCost -= calculateRequestTransitionCost(prev_req, next_req);
+                const int &next_req_id = *std::next(it);
+                transitionCost += calculateRequestTransitionCost(prev_req_id, req_id);
+                transitionCost += calculateRequestTransitionCost(req_id, next_req_id);
+                transitionCost -= calculateRequestTransitionCost(prev_req_id, next_req_id);
             }
         }
 
@@ -488,6 +460,7 @@ class PDPSolver {
         }
 
         int attempt = 0;
+        std::set<int> routeIdxWithAllRequestContextUpdated;
         while (requestsToRemove.size() < max_attempt) {
             std::discrete_distribution<> routeDist(probabilities.begin(), probabilities.end());
             int routeIdx = routeCosts[routeDist(gen)].second;
@@ -498,12 +471,19 @@ class PDPSolver {
 
             // Find highest cost requests in this route
             std::vector<std::pair<ll, int>> routeRequestCosts;
+
+            if (routeIdxWithAllRequestContextUpdated.find(routeIdx) == routeIdxWithAllRequestContextUpdated.end()) {
+                routeIdxWithAllRequestContextUpdated.insert(routeIdx);
+                for (auto it = route.list_reqs.begin(); it != route.list_reqs.end(); ++it) {
+                    int req_id = *it;
+                    if (!isRequestRemoved[req_id])
+                        updateRequestContext(req_id, route, it);
+                }
+            }
             for (auto it = route.list_reqs.begin(); it != route.list_reqs.end(); ++it) {
                 int req_id = *it;
-                if (!isRequestRemoved[req_id]) {
-                    updateRequestContext(req_id, route, it);
+                if (!isRequestRemoved[req_id])
                     routeRequestCosts.push_back({requestContexts[req_id].transitionCost, req_id});
-                }
             }
 
             if (!routeRequestCosts.empty()) {
@@ -539,7 +519,7 @@ class PDPSolver {
                 // Update contexts of adjacent requests after removal
                 if (hasPrev) {
                     updateRequestContext(prevRequestId, route, prevPos);
-                } 
+                }
                 if (hasNext) {
                     updateRequestContext(nextRequestId, route, nextPos);
                 }
@@ -584,10 +564,6 @@ class PDPSolver {
                 requestContexts[req_id].routeIdx = bestRoute;
             }
         }
-    }
-
-    const Request &findRequestById(int request_id) const {
-        return requests[request_id];
     }
 
     ll calculateF1() {
@@ -1551,7 +1527,7 @@ struct IO {
                          trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
-        // freopen("/media/nhdandz/Data/Hackathon/TIKI/tc/5/out.txt", "w", stdout);
+        // freopen("tc/6/out.txt", "w", stdout);
 
         std::array<Route, MAX_VEHICLES> solution = solver.getSolution();
         std::cout << "ROUTES " << num_vehicles << std::endl;
@@ -1719,7 +1695,7 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    // freopen("/media/nhdandz/Data/Hackathon/TIKI/tc/1/inp.txt", "r", stdin);
+    // freopen("tc/6/inp.txt", "r", stdin);
 
     IO io(100000, 1000000, 0);
     io.input();
