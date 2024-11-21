@@ -1198,7 +1198,7 @@ struct Edge {
 class MinWeightMatching {
   private:
     std::vector<std::vector<ll>> graph;
-    int n; // Original number of nodes
+    int n;
 
   public:
     MinWeightMatching(const std::vector<std::vector<ll>> &adjacency_matrix)
@@ -1245,8 +1245,10 @@ class MinWeightMatching {
                 }
             }
         }
+
         return {matches, remaining_node};
     }
+
     ContainerSize getContainerSize(int size) {
         return size == 20 ? TWENTY_FT : FORTY_FT;
     }
@@ -1255,16 +1257,16 @@ class MinWeightMatching {
         ll total_weight = 0;
         ll max_weight = -1;
         n_new = 0;
-        // std::cout << "Matches:\n";
+
         for (const auto &match : matches) {
             int u = match.first;
             int v = match.second;
+
             ll weight = graph[u][v];
 
             total_weight += weight;
             max_weight = std::max(max_weight, weight);
-            // cout << requests_20ft[u].id << " " << requests_20ft[v].id << endl;
-            //  std::cout << "(" << u << "," << v << ") weight: " << weight << " " << requests_20ft[u].id << " " << requests_20ft[v].id << "\n";
+
             int pickup_point, drop_point;
             Action pickup_action, drop_action;
             if (combinationType[u][v] == 0b0011 || combinationType[u][v] == 0b1100) {
@@ -1309,6 +1311,7 @@ class MinWeightMatching {
                 drop_point,
                 drop_action,
                 0};
+
             requests[n_new] = request;
             Real_idx[n_new] = requests_20ft[u].id;
         }
@@ -1316,8 +1319,6 @@ class MinWeightMatching {
             requests[++n_new] = requests_20ft[remaining_node];
             requests[n_new].id = n_new;
             Real_idx[n_new] = requests_20ft[remaining_node].id;
-
-            // std::cout << "Remaining unmatched node: " << remaining_node << "\n";
         }
         for (auto t : requests_origin)
             if (t.size == 40) {
@@ -1325,13 +1326,6 @@ class MinWeightMatching {
                 requests[n_new].id = n_new;
                 Real_idx[n_new] = t.id;
             }
-        // for(int i = 1; i <= n_new; i++)
-        //    cout << requests[i].id << " " << requests[i].size << " " << Real_idx[requests[i].id] << " " << Matched[Real_idx[requests[i].id]] << endl;
-        // for (int i = 1; i <= n_new; i++)
-        //     cout << i << " " << requests[i].id << " " << Real_idx[requests[i].id] << " " << Matched[Real_idx[requests[i].id]] << " " << requests[i].pickup_point << " " << actions[requests[i].pickup_action] << " " << requests[i].drop_point << " " << actions[requests[i].drop_action] << endl;
-        // cout << endl;
-        // std::cout << "Total weight: " << total_weight << "\n";
-        // std::cout << "Maximum edge weight: " << max_weight << "\n";
     }
 };
 
@@ -1527,7 +1521,7 @@ struct IO {
                          trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
-        // freopen("tc/6/out.txt", "w", stdout);
+        // freopen("tc/3/out.txt", "w", stdout);
 
         std::array<Route, MAX_VEHICLES> solution = solver.getSolution();
         std::cout << "ROUTES " << num_vehicles << std::endl;
@@ -1535,11 +1529,6 @@ struct IO {
             std::cout << "TRUCK " << i + 1 << std::endl;
             output_route(solution[i]);
         }
-        // for (size_t i = 0; i < num_vehicles; i++)
-        // {
-        //     std::cout << "TRUCK " << i + 1 << std::endl;
-        //     output_route1(solution[i]);
-        // }
     }
 
     void output1() {
@@ -1555,11 +1544,6 @@ struct IO {
             std::cout << "TRUCK " << i + 1 << std::endl;
             output_route1(solution[i]);
         }
-        // for (size_t i = 0; i < num_vehicles; i++)
-        // {
-        //     std::cout << "TRUCK " << i + 1 << std::endl;
-        //     output_route1(solution[i]);
-        // }
     }
     ll getDistance(int from, int to) {
         return distances[from][to];
@@ -1599,14 +1583,12 @@ struct IO {
         // 1. p1->d1->p2->d2 (pattern: 0011)
         combinations.push_back({req1_self_cost + req2_self_cost +
                                     dist_p1_d1 +
-                                    calculateRequestTransitionCost(req1, req2) +
                                     dist_p2_d2,
                                 0b0011});
 
         // 2. p2->d2->p1->d1 (pattern: 1100)
         combinations.push_back({req1_self_cost + req2_self_cost +
                                     dist_p2_d2 +
-                                    calculateRequestTransitionCost(req2, req1) +
                                     dist_p1_d1,
                                 0b1100});
 
@@ -1661,7 +1643,6 @@ struct IO {
         int i = 0;
         for (auto t : requests_20ft) {
             i++;
-            // cout << t.id << " " << t.pickup_point << " " << t.drop_point << endl;
             if (i == idx)
                 break;
         }
@@ -1695,7 +1676,7 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    // freopen("tc/6/inp.txt", "r", stdin);
+    // freopen("tc/3/inp.txt", "r", stdin);
 
     IO io(100000, 1000000, 0);
     io.input();
