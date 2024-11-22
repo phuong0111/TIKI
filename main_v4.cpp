@@ -6,6 +6,7 @@ typedef long int ll;
 const int MAX_POINT = 1001;
 const int MAX_VEHICLES = 501;
 const int MAX_REQUESTS = 1001;
+std::chrono::high_resolution_clock::time_point start_time;
 
 enum Action {
     PICKUP_CONTAINER,
@@ -633,7 +634,6 @@ class PDPSolver {
     PDPSolver() {}
 
     void solve() {
-        auto start_time = chrono::high_resolution_clock::now();
         // Initialize removal status
         std::fill(isRequestRemoved.begin(), isRequestRemoved.end(), true);
         insertRequests(requestIdx);
@@ -1135,9 +1135,7 @@ class PDPSolver1 {
         }
     }
 
-    void solve() {
-        auto start_time = chrono::high_resolution_clock::now();
-
+    void solve() {        
         vector<int> unassignedRequests;
         for (const Request &req : requests) {
             unassignedRequests.push_back(req.id);
@@ -1153,7 +1151,7 @@ class PDPSolver1 {
         for (int iter = 0; iter < max_iterations && currentTemp > 1e-8; iter++) {
             auto current_time = chrono::high_resolution_clock::now();
             double elapsed_time = chrono::duration_cast<chrono::milliseconds>(current_time - start_time).count() / 1000.0;
-            if (elapsed_time >= 29)
+            if (elapsed_time >= 29.50)
                 break;
             int numToRemove = max(2, min(40, static_cast<int>(0.1 + (0.3 * (rand() % 100) / 100.0) * requests.size())));
 
@@ -1196,7 +1194,7 @@ class PDPSolver1 {
             //     << " Temp: " << currentTemp << endl;
 
             currentTemp *= coolingRate;
-            if (elapsed_time >= 29)
+            if (elapsed_time >= 29.50)
                 break;
         }
 
@@ -2356,9 +2354,10 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
+    start_time = chrono::high_resolution_clock::now();
     // freopen("tc/6/inp.txt", "r", stdin);
 
-    IO io(100000, 10000, 0);
+    IO io(100000, 100000, 0);
     io.input();
     if (n_total > 100) {
         io.pairMatching();
