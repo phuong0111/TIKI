@@ -168,6 +168,7 @@ struct Route1 {
 struct RequestContext {
     int request_id;
     ll transitionCost;                 // Cost of transitions (prev->curr->next)
+    ll selfCost = 0;                   // Cost of request itself (pickup + drop duration)
     int routeIdx;                      // Which route this request is in
     std::list<int>::iterator position; // Position in route
 };
@@ -184,11 +185,6 @@ std::array<bool, MAX_REQUESTS> isRequestRemoved;
 std::vector<std::vector<ll>> graphWeight;
 std::vector<std::vector<int>> combinationType;
 int idx = 0, n_new = 0, n_total = 0;
-
-std::array<std::array<ll, MAX_REQUESTS>, MAX_REQUESTS> transitionCostRequestRequest;
-std::array<std::array<ll, MAX_REQUESTS>, MAX_POINT> transitionCostDepotRequest;
-std::array<std::array<ll, MAX_POINT>, MAX_REQUESTS> transitionCostRequestDepot;
-std::array<ll, MAX_REQUESTS> requestContextCost;
 
 class PDPSolver {
   private:
@@ -211,85 +207,63 @@ class PDPSolver {
         return distances[from][to];
     }
 
-    ll calculateRequestContextCost(const int &request_id) {
-        if (requestContextCost[request_id] == 0) {
-            const Request &req = requests[request_id];
-            requestContextCost[request_id] = req.pickup_duration + req.drop_duration + getDistance(req.pickup_point, req.drop_point);
-        }
-
-        return requestContextCost[request_id];
+    ll calculateRequestContextCost(const Request &req) {
+        return req.pickup_duration + req.drop_duration + getDistance(req.pickup_point, req.drop_point);
     }
 
-    ll calculateDepotToRequestCost(const int &depot, const int &req_id) {
-        if (transitionCostDepotRequest[depot][req_id] == 0) {
-            const Request &req = requests[req_id];
-            if (req.pickup_action == PICKUP_CONTAINER)
-                transitionCostDepotRequest[depot][req_id] = getDistance(depot, trailer_point) + trailer_pickup_time + getDistance(trailer_point, req.pickup_point);
-            else
-                transitionCostDepotRequest[depot][req_id] = getDistance(depot, req.pickup_point); // PICKUP_CONTAINER_TRAILER
-        }
-
-        return transitionCostDepotRequest[depot][req_id];
+    ll calculateDepotToRequestCost(const int &depot, const Request &req) {
+        if (req.pickup_action == PICKUP_CONTAINER)
+            return getDistance(depot, trailer_point) + trailer_pickup_time + getDistance(trailer_point, req.pickup_point);
+        return getDistance(depot, req.pickup_point); // PICKUP_CONTAINER_TRAILER
     }
 
-    ll calculateRequestToDepotCost(const int &req_id, const int &depot) {
-        if (transitionCostRequestDepot[req_id][depot] == 0) {
-            const Request &req = requests[req_id];
-            if (req.drop_action == DROP_CONTAINER)
-                transitionCostRequestDepot[req_id][depot] = getDistance(req.drop_point, trailer_point) + trailer_pickup_time + getDistance(trailer_point, depot);
-            else
-                transitionCostRequestDepot[req_id][depot] = getDistance(req.drop_point, depot); // DROP_CONTAINER_TRAILER
-        }
-
-        return transitionCostRequestDepot[req_id][depot];
+    ll calculateRequestToDepotCost(const Request &req, const int &depot) {
+        if (req.drop_action == DROP_CONTAINER)
+            return getDistance(req.drop_point, trailer_point) + trailer_pickup_time + getDistance(trailer_point, depot);
+        return getDistance(req.drop_point, depot); // DROP_CONTAINER_TRAILER
     }
 
-    ll calculateRequestTransitionCost(const int &curr_req_id, const int &next_req_id) {
-        if (transitionCostRequestRequest[curr_req_id][next_req_id] == 0) {
-            const Request &curr_req = requests[curr_req_id];
-            const Request &next_req = requests[next_req_id];
-            if ((curr_req.drop_action == DROP_CONTAINER && next_req.pickup_action == PICKUP_CONTAINER_TRAILER) ||
-                (curr_req.drop_action == DROP_CONTAINER_TRAILER && next_req.pickup_action == PICKUP_CONTAINER))
-                transitionCostRequestRequest[curr_req_id][next_req_id] = getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
-            else
-                transitionCostRequestRequest[curr_req_id][next_req_id] = getDistance(curr_req.drop_point, next_req.pickup_point);
-        }
-
-        return transitionCostRequestRequest[curr_req_id][next_req_id];
+    ll calculateRequestTransitionCost(const Request &curr_req, const Request &next_req) {
+        if (curr_req.drop_action == DROP_CONTAINER && next_req.pickup_action == PICKUP_CONTAINER_TRAILER)
+            return getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
+        if (curr_req.drop_action == DROP_CONTAINER_TRAILER && next_req.pickup_action == PICKUP_CONTAINER)
+            return getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
+        return getDistance(curr_req.drop_point, next_req.pickup_point);
     }
 
     ll calculateInsertionCost(const Route &route, const int request_id, std::list<int>::iterator position) {
+        const Request &req = requests[request_id];
         ll costDelta = 0;
 
         if (route.list_reqs.empty()) {
             // If route is empty, just calculate depot -> request -> depot
-            return calculateDepotToRequestCost(route.depot, request_id) +
-                   calculateRequestContextCost(request_id) +
-                   calculateRequestToDepotCost(request_id, route.depot);
+            return calculateDepotToRequestCost(route.depot, req) +
+                   calculateRequestContextCost(req) +
+                   calculateRequestToDepotCost(req, route.depot);
         }
 
         if (position == route.list_reqs.begin()) {
             // Inserting at start of route
-            const int &next_req_id = *position;
-            costDelta = calculateDepotToRequestCost(route.depot, request_id) +
-                        calculateRequestContextCost(request_id) +
-                        calculateRequestTransitionCost(request_id, next_req_id) -
-                        calculateDepotToRequestCost(route.depot, next_req_id);
+            const Request &next_req = requests[*position];
+            costDelta = calculateDepotToRequestCost(route.depot, req) +
+                        calculateRequestContextCost(req) +
+                        calculateRequestTransitionCost(req, next_req) -
+                        calculateDepotToRequestCost(route.depot, next_req);
         } else if (position == route.list_reqs.end()) {
             // Inserting at end of route
-            const int &prev_req_id = *std::prev(position);
-            costDelta = calculateRequestTransitionCost(prev_req_id, request_id) +
-                        calculateRequestContextCost(request_id) +
-                        calculateRequestToDepotCost(request_id, route.depot) -
-                        calculateRequestToDepotCost(prev_req_id, route.depot);
+            const Request &prev_req = requests[*std::prev(position)];
+            costDelta = calculateRequestTransitionCost(prev_req, req) +
+                        calculateRequestContextCost(req) +
+                        calculateRequestToDepotCost(req, route.depot) -
+                        calculateRequestToDepotCost(prev_req, route.depot);
         } else {
             // Inserting between two existing requests
-            const int &prev_req_id = *std::prev(position);
-            const int &next_req_id = *position;
-            costDelta = calculateRequestTransitionCost(prev_req_id, request_id) +
-                        calculateRequestContextCost(request_id) +
-                        calculateRequestTransitionCost(request_id, next_req_id) -
-                        calculateRequestTransitionCost(prev_req_id, next_req_id);
+            const Request &prev_req = requests[*std::prev(position)];
+            const Request &next_req = requests[*position];
+            costDelta = calculateRequestTransitionCost(prev_req, req) +
+                        calculateRequestContextCost(req) +
+                        calculateRequestTransitionCost(req, next_req) -
+                        calculateRequestTransitionCost(prev_req, next_req);
         }
 
         return route.cost + costDelta;
@@ -300,34 +274,74 @@ class PDPSolver {
         if (it == route.list_reqs.end())
             return route.cost; // Request not found
 
-        ll costDelta = -calculateRequestContextCost(request_id); // Remove request's own cost
+        const Request &req = requests[request_id];
+        ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
 
         if (route.list_reqs.size() == 1) {
             // If this is the only request
-            costDelta -= calculateDepotToRequestCost(route.depot, request_id);
-            costDelta -= calculateRequestToDepotCost(request_id, route.depot);
+            costDelta -= calculateDepotToRequestCost(route.depot, req);
+            costDelta -= calculateRequestToDepotCost(req, route.depot);
             return 0; // Route will be empty
         }
 
         if (it == route.list_reqs.begin()) {
             // If removing first request
-            const int &next_req_id = *std::next(it);
-            costDelta -= calculateDepotToRequestCost(route.depot, request_id);
-            costDelta -= calculateRequestTransitionCost(request_id, next_req_id);
-            costDelta += calculateDepotToRequestCost(route.depot, next_req_id);
+            const Request &next_req = requests[*std::next(it)];
+            costDelta -= calculateDepotToRequestCost(route.depot, req);
+            costDelta -= calculateRequestTransitionCost(req, next_req);
+            costDelta += calculateDepotToRequestCost(route.depot, next_req);
         } else if (std::next(it) == route.list_reqs.end()) {
             // If removing last request
-            const int &prev_req_id = *std::prev(it);
-            costDelta -= calculateRequestTransitionCost(prev_req_id, request_id);
-            costDelta -= calculateRequestToDepotCost(request_id, route.depot);
-            costDelta += calculateRequestToDepotCost(prev_req_id, route.depot);
+            const Request &prev_req = requests[*std::prev(it)];
+            costDelta -= calculateRequestTransitionCost(prev_req, req);
+            costDelta -= calculateRequestToDepotCost(req, route.depot);
+            costDelta += calculateRequestToDepotCost(prev_req, route.depot);
         } else {
             // If removing from middle
-            const int &prev_req_id = *std::prev(it);
-            const int &next_req_id = *std::next(it);
-            costDelta -= calculateRequestTransitionCost(prev_req_id, request_id);
-            costDelta -= calculateRequestTransitionCost(request_id, next_req_id);
-            costDelta += calculateRequestTransitionCost(prev_req_id, next_req_id);
+            const Request &prev_req = requests[*std::prev(it)];
+            const Request &next_req = requests[*std::next(it)];
+            costDelta -= calculateRequestTransitionCost(prev_req, req);
+            costDelta -= calculateRequestTransitionCost(req, next_req);
+            costDelta += calculateRequestTransitionCost(prev_req, next_req);
+        }
+
+        return route.cost + costDelta;
+    }
+
+    ll calculateRemovalCost(Route &route, std::list<int>::iterator it) {
+        if (it == route.list_reqs.end())
+            return route.cost; // Request not found
+
+        auto request_id = *it;
+        const Request &req = requests[request_id];
+        ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
+
+        if (route.list_reqs.size() == 1) {
+            // If this is the only request
+            costDelta -= calculateDepotToRequestCost(route.depot, req);
+            costDelta -= calculateRequestToDepotCost(req, route.depot);
+            return 0; // Route will be empty
+        }
+
+        if (it == route.list_reqs.begin()) {
+            // If removing first request
+            const Request &next_req = requests[*std::next(it)];
+            costDelta -= calculateDepotToRequestCost(route.depot, req);
+            costDelta -= calculateRequestTransitionCost(req, next_req);
+            costDelta += calculateDepotToRequestCost(route.depot, next_req);
+        } else if (std::next(it) == route.list_reqs.end()) {
+            // If removing last request
+            const Request &prev_req = requests[*std::prev(it)];
+            costDelta -= calculateRequestTransitionCost(prev_req, req);
+            costDelta -= calculateRequestToDepotCost(req, route.depot);
+            costDelta += calculateRequestToDepotCost(prev_req, route.depot);
+        } else {
+            // If removing from middle
+            const Request &prev_req = requests[*std::prev(it)];
+            const Request &next_req = requests[*std::next(it)];
+            costDelta -= calculateRequestTransitionCost(prev_req, req);
+            costDelta -= calculateRequestTransitionCost(req, next_req);
+            costDelta += calculateRequestTransitionCost(prev_req, next_req);
         }
 
         return route.cost + costDelta;
@@ -339,6 +353,17 @@ class PDPSolver {
 
         // Remove the request
         route.list_reqs.remove(request_id);
+
+        // Update route cost
+        route.cost = newCost;
+    }
+
+    void removeStopsByRequestIt(Route &route, std::list<int>::iterator it) {
+        // Calculate new cost before modifying the list
+        ll newCost = calculateRemovalCost(route, it);
+
+        // Remove the request
+        route.list_reqs.erase(it);
 
         // Update route cost
         route.cost = newCost;
@@ -403,33 +428,36 @@ class PDPSolver {
         context.routeIdx = &route - &currentSolution[0];
         context.position = it;
 
+        const Request &curr_req = requests[req_id];
+        // context.selfCost = calculateRequestContextCost(curr_req);
+
         // Calculate transition cost
         ll transitionCost = 0;
 
         if (it == route.list_reqs.begin()) {
             // First request
-            transitionCost += calculateDepotToRequestCost(route.depot, req_id);
+            transitionCost += calculateDepotToRequestCost(route.depot, curr_req);
             if (std::next(it) != route.list_reqs.end()) {
-                const int &next_req_id = *std::next(it);
-                transitionCost += calculateRequestTransitionCost(req_id, next_req_id);
-                transitionCost -= calculateDepotToRequestCost(route.depot, next_req_id);
+                const Request &next_req = requests[*std::next(it)];
+                transitionCost += calculateRequestTransitionCost(curr_req, next_req);
+                transitionCost -= calculateDepotToRequestCost(route.depot, next_req);
             } else {
-                transitionCost += calculateRequestToDepotCost(req_id, route.depot);
+                transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
             }
         } else {
-            const int &prev_req_id = *std::prev(it);
+            const Request &prev_req = requests[*std::prev(it)];
 
             if (std::next(it) == route.list_reqs.end()) {
                 // Last request
-                transitionCost += calculateRequestTransitionCost(prev_req_id, req_id);
-                transitionCost += calculateRequestToDepotCost(req_id, route.depot);
-                transitionCost -= calculateRequestToDepotCost(prev_req_id, route.depot);
+                transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
+                transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
+                transitionCost -= calculateRequestToDepotCost(prev_req, route.depot);
             } else {
                 // Middle request
-                const int &next_req_id = *std::next(it);
-                transitionCost += calculateRequestTransitionCost(prev_req_id, req_id);
-                transitionCost += calculateRequestTransitionCost(req_id, next_req_id);
-                transitionCost -= calculateRequestTransitionCost(prev_req_id, next_req_id);
+                const Request &next_req = requests[*std::next(it)];
+                transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
+                transitionCost += calculateRequestTransitionCost(curr_req, next_req);
+                transitionCost -= calculateRequestTransitionCost(prev_req, next_req);
             }
         }
 
@@ -460,7 +488,6 @@ class PDPSolver {
         }
 
         int attempt = 0;
-        std::set<int> routeIdxWithAllRequestContextUpdated;
         while (requestsToRemove.size() < max_attempt) {
             std::discrete_distribution<> routeDist(probabilities.begin(), probabilities.end());
             int routeIdx = routeCosts[routeDist(gen)].second;
@@ -471,19 +498,12 @@ class PDPSolver {
 
             // Find highest cost requests in this route
             std::vector<std::pair<ll, int>> routeRequestCosts;
-
-            if (routeIdxWithAllRequestContextUpdated.find(routeIdx) == routeIdxWithAllRequestContextUpdated.end()) {
-                routeIdxWithAllRequestContextUpdated.insert(routeIdx);
-                for (auto it = route.list_reqs.begin(); it != route.list_reqs.end(); ++it) {
-                    int req_id = *it;
-                    if (!isRequestRemoved[req_id])
-                        updateRequestContext(req_id, route, it);
-                }
-            }
             for (auto it = route.list_reqs.begin(); it != route.list_reqs.end(); ++it) {
                 int req_id = *it;
-                if (!isRequestRemoved[req_id])
+                if (!isRequestRemoved[req_id]) {
+                    updateRequestContext(req_id, route, it);
                     routeRequestCosts.push_back({requestContexts[req_id].transitionCost, req_id});
+                }
             }
 
             if (!routeRequestCosts.empty()) {
@@ -564,6 +584,10 @@ class PDPSolver {
                 requestContexts[req_id].routeIdx = bestRoute;
             }
         }
+    }
+
+    const Request &findRequestById(int request_id) const {
+        return requests[request_id];
     }
 
     ll calculateF1() {
@@ -1195,55 +1219,690 @@ struct Edge {
     }
 };
 
+#define EVEN 2
+#define ODD 1
+#define UNLABELED 0
+
+#define EPSILON 0.000001
+#define INFINITO 1000000000.0
+#define GREATER(A, B) ((A) - (B) > EPSILON)
+#define LESS(A, B) ((B) - (A) > EPSILON)
+#define EQUAL(A, B) (fabs((A) - (B)) < EPSILON)
+#define GREATER_EQUAL(A, B) (GREATER((A), (B)) || EQUAL((A), (B)))
+#define LESS_EQUAL(A, B) (LESS((A), (B)) || EQUAL((A), (B)))
+#define MIN(A, B) (LESS((A), (B)) ? (A) : (B))
+#define MAX(A, B) (LESS((A), (B)) ? (B) : (A))
+
+class BinaryHeap {
+  private:
+    vector<double> key;
+    vector<int> pos;
+    vector<int> satellite;
+    int size;
+
+  public:
+    BinaryHeap() : satellite(1), size(0) {}
+
+    void Clear() {
+        key.clear();
+        pos.clear();
+        satellite.clear();
+        satellite.resize(1);
+        size = 0;
+    }
+
+    void Insert(double k, int s) {
+        if (s >= (int)pos.size()) {
+            pos.resize(s + 1, -1);
+            key.resize(s + 1);
+            satellite.resize(s + 2);
+        } else if (pos[s] != -1) {
+            throw "Error: satellite already in heap";
+        }
+
+        int i;
+        for (i = ++size; i / 2 > 0 && GREATER(key[satellite[i / 2]], k); i /= 2) {
+            satellite[i] = satellite[i / 2];
+            pos[satellite[i]] = i;
+        }
+        satellite[i] = s;
+        pos[s] = i;
+        key[s] = k;
+    }
+
+    int Size() { return size; }
+
+    int DeleteMin() {
+        if (size == 0)
+            throw "Error: empty heap";
+
+        int min = satellite[1];
+        int slast = satellite[size--];
+
+        int child;
+        int i;
+        for (i = 1, child = 2; child <= size; i = child, child *= 2) {
+            if (child < size && GREATER(key[satellite[child]], key[satellite[child + 1]]))
+                child++;
+
+            if (GREATER(key[slast], key[satellite[child]])) {
+                satellite[i] = satellite[child];
+                pos[satellite[child]] = i;
+            } else
+                break;
+        }
+        satellite[i] = slast;
+        pos[slast] = i;
+        pos[min] = -1;
+        return min;
+    }
+
+    void ChangeKey(double k, int s) {
+        Remove(s);
+        Insert(k, s);
+    }
+
+    void Remove(int s) {
+        int i;
+        for (i = pos[s]; i / 2 > 0; i /= 2) {
+            satellite[i] = satellite[i / 2];
+            pos[satellite[i]] = i;
+        }
+        satellite[1] = s;
+        pos[s] = 1;
+        DeleteMin();
+    }
+};
+
+class Matching {
+  private:
+    const vector<vector<double>> &G;
+    list<int> free;
+    vector<int> outer;
+    vector<list<int>> deep;
+    vector<list<int>> shallow;
+    vector<int> tip;
+    vector<bool> active;
+    vector<int> type;
+    vector<int> forest;
+    vector<int> root;
+    vector<bool> blocked;
+    vector<double> dual;
+    vector<vector<double>> slack;
+    vector<int> mate;
+    int n;
+    bool perfect;
+    list<int> forestList;
+    vector<int> visited;
+
+    bool IsEdgeBlocked(int u, int v) {
+        return GREATER(slack[u][v], 0);
+    }
+
+    bool IsAdjacent(int u, int v) {
+        return !IsEdgeBlocked(u, v);
+    }
+
+    void DestroyBlossom(int t) {
+        if ((t < n) || (blocked[t] && GREATER(dual[t], 0)))
+            return;
+
+        for (list<int>::iterator it = shallow[t].begin(); it != shallow[t].end(); it++) {
+            int s = *it;
+            outer[s] = s;
+            for (list<int>::iterator jt = deep[s].begin(); jt != deep[s].end(); jt++)
+                outer[*jt] = s;
+
+            DestroyBlossom(s);
+        }
+
+        active[t] = false;
+        blocked[t] = false;
+        AddFreeBlossomIndex(t);
+        mate[t] = -1;
+    }
+
+    void Expand(int u, bool expandBlocked = false) {
+        int v = outer[mate[u]];
+
+        double minSlack = INFINITO;
+        int p = -1, q = -1;
+
+        for (list<int>::iterator it = deep[u].begin(); it != deep[u].end(); it++) {
+            int di = *it;
+            for (list<int>::iterator jt = deep[v].begin(); jt != deep[v].end(); jt++) {
+                int dj = *jt;
+                if (IsAdjacent(di, dj) && LESS(slack[di][dj], minSlack)) {
+                    minSlack = slack[di][dj];
+                    p = di;
+                    q = dj;
+                }
+            }
+        }
+
+        mate[u] = q;
+        mate[v] = p;
+
+        if (u < n || (blocked[u] && !expandBlocked))
+            return;
+
+        bool found = false;
+        for (list<int>::iterator it = shallow[u].begin(); it != shallow[u].end() && !found;) {
+            int si = *it;
+            for (list<int>::iterator jt = deep[si].begin(); jt != deep[si].end() && !found; jt++) {
+                if (*jt == p)
+                    found = true;
+            }
+            it++;
+            if (!found) {
+                shallow[u].push_back(si);
+                shallow[u].pop_front();
+            }
+        }
+
+        list<int>::iterator it = shallow[u].begin();
+        mate[*it] = mate[u];
+        it++;
+
+        while (it != shallow[u].end()) {
+            list<int>::iterator itnext = it;
+            itnext++;
+            mate[*it] = *itnext;
+            mate[*itnext] = *it;
+            itnext++;
+            it = itnext;
+        }
+
+        for (list<int>::iterator it = shallow[u].begin(); it != shallow[u].end(); it++) {
+            int s = *it;
+            outer[s] = s;
+            for (list<int>::iterator jt = deep[s].begin(); jt != deep[s].end(); jt++)
+                outer[*jt] = s;
+        }
+        active[u] = false;
+        AddFreeBlossomIndex(u);
+
+        for (list<int>::iterator it = shallow[u].begin(); it != shallow[u].end(); it++)
+            Expand(*it, expandBlocked);
+    }
+
+    void Augment(int u, int v) {
+        int p = outer[u];
+        int q = outer[v];
+        int outv = q;
+        int fp = forest[p];
+        mate[p] = q;
+        mate[q] = p;
+        Expand(p);
+        Expand(q);
+
+        while (fp != -1) {
+            q = outer[forest[p]];
+            p = outer[forest[q]];
+            fp = forest[p];
+
+            mate[p] = q;
+            mate[q] = p;
+            Expand(p);
+            Expand(q);
+        }
+
+        p = outv;
+        fp = forest[p];
+        while (fp != -1) {
+            q = outer[forest[p]];
+            p = outer[forest[q]];
+            fp = forest[p];
+
+            mate[p] = q;
+            mate[q] = p;
+            Expand(p);
+            Expand(q);
+        }
+    }
+
+    int Blossom(int u, int v) {
+        int t = GetFreeBlossomIndex();
+        vector<bool> isInPath(2 * n, false);
+
+        int u_ = u;
+        while (u_ != -1) {
+            isInPath[outer[u_]] = true;
+            u_ = forest[outer[u_]];
+        }
+
+        int v_ = outer[v];
+        while (!isInPath[v_])
+            v_ = outer[forest[v_]];
+        tip[t] = v_;
+
+        list<int> circuit;
+        u_ = outer[u];
+        circuit.push_front(u_);
+        while (u_ != tip[t]) {
+            u_ = outer[forest[u_]];
+            circuit.push_front(u_);
+        }
+
+        shallow[t].clear();
+        deep[t].clear();
+        for (list<int>::iterator it = circuit.begin(); it != circuit.end(); it++) {
+            shallow[t].push_back(*it);
+        }
+
+        v_ = outer[v];
+        while (v_ != tip[t]) {
+            shallow[t].push_back(v_);
+            v_ = outer[forest[v_]];
+        }
+
+        for (list<int>::iterator it = shallow[t].begin(); it != shallow[t].end(); it++) {
+            u_ = *it;
+            outer[u_] = t;
+            for (list<int>::iterator jt = deep[u_].begin(); jt != deep[u_].end(); jt++) {
+                deep[t].push_back(*jt);
+                outer[*jt] = t;
+            }
+        }
+
+        forest[t] = forest[tip[t]];
+        type[t] = EVEN;
+        root[t] = root[tip[t]];
+        active[t] = true;
+        outer[t] = t;
+        mate[t] = mate[tip[t]];
+
+        return t;
+    }
+
+    void Reset() {
+        for (int i = 0; i < 2 * n; i++) {
+            forest[i] = -1;
+            root[i] = i;
+
+            if (i >= n && active[i] && outer[i] == i)
+                DestroyBlossom(i);
+        }
+
+        visited.assign(2 * n, 0);
+        forestList.clear();
+        for (int i = 0; i < n; i++) {
+            if (mate[outer[i]] == -1) {
+                type[outer[i]] = 2;
+                if (!visited[outer[i]])
+                    forestList.push_back(i);
+                visited[outer[i]] = true;
+            } else
+                type[outer[i]] = 0;
+        }
+    }
+
+    int GetFreeBlossomIndex() {
+        int i = free.back();
+        free.pop_back();
+        return i;
+    }
+
+    void AddFreeBlossomIndex(int i) {
+        free.push_back(i);
+    }
+
+    void ClearBlossomIndices() {
+        free.clear();
+        for (int i = n; i < 2 * n; i++)
+            AddFreeBlossomIndex(i);
+    }
+
+    void Grow() {
+        Reset();
+
+        while (!forestList.empty()) {
+            int w = outer[forestList.front()];
+            forestList.pop_front();
+
+            for (list<int>::iterator it = deep[w].begin(); it != deep[w].end(); it++) {
+                int u = *it;
+
+                for (int v = 0; v < n; v++) {
+                    if (u == v)
+                        continue;
+
+                    if (IsEdgeBlocked(u, v))
+                        continue;
+
+                    if (type[outer[v]] == ODD)
+                        continue;
+
+                    if (type[outer[v]] != EVEN) {
+                        int vm = mate[outer[v]];
+
+                        forest[outer[v]] = u;
+                        type[outer[v]] = ODD;
+                        root[outer[v]] = root[outer[u]];
+                        forest[outer[vm]] = v;
+                        type[outer[vm]] = EVEN;
+                        root[outer[vm]] = root[outer[u]];
+
+                        if (!visited[outer[vm]]) {
+                            forestList.push_back(vm);
+                            visited[outer[vm]] = true;
+                        }
+                    } else if (root[outer[v]] != root[outer[u]]) {
+                        Augment(u, v);
+                        Reset();
+                        goto next_iteration;
+                    } else if (outer[u] != outer[v]) {
+                        int b = Blossom(u, v);
+                        forestList.push_front(b);
+                        visited[b] = true;
+                        goto next_iteration;
+                    }
+                }
+            }
+        next_iteration:;
+        }
+
+        perfect = true;
+        for (int i = 0; i < n; i++)
+            if (mate[outer[i]] == -1)
+                perfect = false;
+    }
+
+    void Heuristic() {
+        vector<int> degree(n, 0);
+        BinaryHeap B;
+
+        for (int u = 0; u < n; u++) {
+            for (int v = 0; v < n; v++) {
+                if (u != v && !IsEdgeBlocked(u, v)) {
+                    degree[u]++;
+                }
+            }
+        }
+
+        for (int i = 0; i < n; i++)
+            B.Insert(degree[i], i);
+
+        while (B.Size() > 0) {
+            int u = B.DeleteMin();
+            if (mate[outer[u]] == -1) {
+                int min = -1;
+                for (int v = 0; v < n; v++) {
+                    if (u == v)
+                        continue;
+
+                    if (IsEdgeBlocked(u, v) ||
+                        (outer[u] == outer[v]) ||
+                        (mate[outer[v]] != -1))
+                        continue;
+
+                    if (min == -1 || degree[v] < degree[min])
+                        min = v;
+                }
+                if (min != -1) {
+                    mate[outer[u]] = min;
+                    mate[outer[min]] = u;
+                }
+            }
+        }
+    }
+
+    void UpdateDualCosts() {
+        double e1 = 0, e2 = 0, e3 = 0;
+        bool inite1 = false, inite2 = false, inite3 = false;
+
+        for (int u = 0; u < n; u++) {
+            for (int v = 0; v < n; v++) {
+                if (u == v)
+                    continue;
+
+                if ((type[outer[u]] == EVEN && type[outer[v]] == UNLABELED) ||
+                    (type[outer[v]] == EVEN && type[outer[u]] == UNLABELED)) {
+                    if (!inite1 || GREATER(e1, slack[u][v])) {
+                        e1 = slack[u][v];
+                        inite1 = true;
+                    }
+                } else if ((outer[u] != outer[v]) && type[outer[u]] == EVEN && type[outer[v]] == EVEN) {
+                    if (!inite2 || GREATER(e2, slack[u][v])) {
+                        e2 = slack[u][v];
+                        inite2 = true;
+                    }
+                }
+            }
+        }
+
+        for (int i = n; i < 2 * n; i++) {
+            if (active[i] && i == outer[i] && type[outer[i]] == ODD &&
+                (!inite3 || GREATER(e3, dual[i]))) {
+                e3 = dual[i];
+                inite3 = true;
+            }
+        }
+
+        double e = 0;
+        if (inite1)
+            e = e1;
+        else if (inite2)
+            e = e2;
+        else if (inite3)
+            e = e3;
+
+        if (GREATER(e, e2 / 2.0) && inite2)
+            e = e2 / 2.0;
+        if (GREATER(e, e3) && inite3)
+            e = e3;
+
+        for (int i = 0; i < 2 * n; i++) {
+            if (i != outer[i])
+                continue;
+
+            if (active[i] && type[outer[i]] == EVEN)
+                dual[i] += e;
+            else if (active[i] && type[outer[i]] == ODD)
+                dual[i] -= e;
+        }
+
+        for (int u = 0; u < n; u++) {
+            for (int v = 0; v < n; v++) {
+                if (u == v)
+                    continue;
+
+                if (outer[u] != outer[v]) {
+                    if (type[outer[u]] == EVEN && type[outer[v]] == EVEN)
+                        slack[u][v] -= 2.0 * e;
+                    else if (type[outer[u]] == ODD && type[outer[v]] == ODD)
+                        slack[u][v] += 2.0 * e;
+                    else if ((type[outer[v]] == UNLABELED && type[outer[u]] == EVEN) ||
+                             (type[outer[u]] == UNLABELED && type[outer[v]] == EVEN))
+                        slack[u][v] -= e;
+                    else if ((type[outer[v]] == UNLABELED && type[outer[u]] == ODD) ||
+                             (type[outer[u]] == UNLABELED && type[outer[v]] == ODD))
+                        slack[u][v] += e;
+                }
+            }
+        }
+
+        for (int i = n; i < 2 * n; i++) {
+            if (GREATER(dual[i], 0)) {
+                blocked[i] = true;
+            } else if (active[i] && blocked[i]) {
+                if (mate[i] == -1) {
+                    DestroyBlossom(i);
+                } else {
+                    blocked[i] = false;
+                    Expand(i);
+                }
+            }
+        }
+    }
+
+    void PositiveCosts() {
+        double minEdge = 0;
+        for (int u = 0; u < n; u++) {
+            for (int v = 0; v < n; v++) {
+                if (u == v)
+                    continue;
+                if (GREATER(minEdge - slack[u][v], 0))
+                    minEdge = slack[u][v];
+            }
+        }
+
+        for (int u = 0; u < n; u++) {
+            for (int v = 0; v < n; v++) {
+                if (u == v)
+                    continue;
+                slack[u][v] -= minEdge;
+            }
+        }
+    }
+
+    void Clear() {
+        ClearBlossomIndices();
+
+        for (int i = 0; i < 2 * n; i++) {
+            outer[i] = i;
+            deep[i].clear();
+            if (i < n)
+                deep[i].push_back(i);
+            shallow[i].clear();
+            if (i < n)
+                active[i] = true;
+            else
+                active[i] = false;
+
+            type[i] = 0;
+            forest[i] = -1;
+            root[i] = i;
+            blocked[i] = false;
+            dual[i] = 0;
+            mate[i] = -1;
+            tip[i] = i;
+        }
+        slack.assign(n, vector<double>(n, 0));
+    }
+
+    vector<pair<int, int>> RetrieveMatching() {
+        vector<pair<int, int>> matching;
+
+        for (int i = 0; i < 2 * n; i++)
+            if (active[i] && mate[i] != -1 && outer[i] == i)
+                Expand(i, true);
+
+        for (int u = 0; u < n; u++) {
+            for (int v = u + 1; v < n; v++) {
+                if (mate[u] == v)
+                    matching.push_back({u, v});
+            }
+        }
+        return matching;
+    }
+
+  public:
+    Matching(const vector<vector<double>> &graph) : G(graph),
+                                                    outer(2 * graph.size()),
+                                                    deep(2 * graph.size()),
+                                                    shallow(2 * graph.size()),
+                                                    tip(2 * graph.size()),
+                                                    active(2 * graph.size()),
+                                                    type(2 * graph.size()),
+                                                    forest(2 * graph.size()),
+                                                    root(2 * graph.size()),
+                                                    blocked(2 * graph.size()),
+                                                    dual(2 * graph.size()),
+                                                    slack(graph.size(), vector<double>(graph.size())),
+                                                    mate(2 * graph.size()),
+                                                    n(graph.size()),
+                                                    visited(2 * graph.size()) {
+    }
+
+    pair<vector<pair<int, int>>, double> SolveMinimumCostPerfectMatching() {
+        SolveMaximumMatching();
+        if (!perfect)
+            throw "Error: The graph does not have a perfect matching";
+
+        Clear();
+
+        // Initialize slacks
+        for (int u = 0; u < n; u++) {
+            for (int v = 0; v < n; v++) {
+                if (u != v)
+                    slack[u][v] = G[u][v];
+            }
+        }
+
+        PositiveCosts();
+
+        perfect = false;
+        while (!perfect) {
+            Heuristic();
+            Grow();
+            UpdateDualCosts();
+            Reset();
+        }
+
+        vector<pair<int, int>> matching = RetrieveMatching();
+
+        double obj = 0;
+        for (const auto &edge : matching) {
+            obj += G[edge.first][edge.second];
+        }
+
+        double dualObj = 0;
+        for (int i = 0; i < 2 * n; i++) {
+            if (i < n)
+                dualObj += dual[i];
+            else if (blocked[i])
+                dualObj += dual[i];
+        }
+
+        return {matching, obj};
+    }
+
+    vector<pair<int, int>> SolveMaximumMatching() {
+        Clear();
+        Grow();
+        return RetrieveMatching();
+    }
+};
+
 class MinWeightMatching {
   private:
     std::vector<std::vector<ll>> graph;
-    int n;
+    int n; // Original number of nodes
 
   public:
     MinWeightMatching(const std::vector<std::vector<ll>> &adjacency_matrix)
         : graph(adjacency_matrix), n(adjacency_matrix.size()) {}
 
-    // Returns {matches, remaining_node_id}, where remaining_node_id is -1 if none
     std::pair<std::vector<std::pair<int, int>>, int> findMinWeightMatching() {
         std::vector<std::pair<int, int>> matches;
-        // Priority queue to store edges sorted by weight
-        std::priority_queue<Edge> edges;
+        int remaining_node = -1;
+        int is_odd = (n & 1);
 
-        // Add all edges to priority queue
+        vector<vector<double>> g(n + is_odd, vector<double>(n + is_odd));
         for (int i = 0; i < n; i++) {
             for (int j = i + 1; j < n; j++) {
-                edges.push(Edge(i, j, graph[i][j]));
+                g[i][j] = g[j][i] = graph[i][j];
             }
         }
 
-        // Keep track of matched nodes
-        std::set<int> matched;
-        bool is_odd = (n % 2 != 0);
-
-        // Greedily match nodes using smallest available edges
-        while (!edges.empty() && matched.size() < n - (is_odd ? 1 : 0)) {
-            Edge e = edges.top();
-            edges.pop();
-
-            // If both nodes are unmatched, match them
-            if (matched.find(e.u) == matched.end() &&
-                matched.find(e.v) == matched.end()) {
-                matches.push_back({e.u, e.v});
-                matched.insert(e.u);
-                matched.insert(e.v);
-            }
-        }
-
-        // Find remaining node if odd number of nodes
-        int remaining_node = -1;
         if (is_odd) {
             for (int i = 0; i < n; i++) {
-                if (matched.find(i) == matched.end()) {
-                    remaining_node = i;
-                    break;
-                }
+                g[i][n] = g[n][i] = 0;
             }
+        }
+
+        Matching M(g);
+        auto [matching, cost] = M.SolveMinimumCostPerfectMatching();
+
+        for (const auto &edge : matching) {
+            auto u = edge.first, v = edge.second;
+            if (u > v)
+                swap(u, v);
+            if (is_odd && v == n)
+                remaining_node = u;
+            else
+                matches.push_back({u, v});
         }
 
         return {matches, remaining_node};
@@ -1257,16 +1916,16 @@ class MinWeightMatching {
         ll total_weight = 0;
         ll max_weight = -1;
         n_new = 0;
-
+        // std::cout << "Matches:\n";
         for (const auto &match : matches) {
             int u = match.first;
             int v = match.second;
-
             ll weight = graph[u][v];
 
             total_weight += weight;
             max_weight = std::max(max_weight, weight);
-
+            // cout << requests_20ft[u].id << " " << requests_20ft[v].id << endl;
+            //  std::cout << "(" << u << "," << v << ") weight: " << weight << " " << requests_20ft[u].id << " " << requests_20ft[v].id << "\n";
             int pickup_point, drop_point;
             Action pickup_action, drop_action;
             if (combinationType[u][v] == 0b0011 || combinationType[u][v] == 0b1100) {
@@ -1311,7 +1970,6 @@ class MinWeightMatching {
                 drop_point,
                 drop_action,
                 0};
-
             requests[n_new] = request;
             Real_idx[n_new] = requests_20ft[u].id;
         }
@@ -1319,6 +1977,8 @@ class MinWeightMatching {
             requests[++n_new] = requests_20ft[remaining_node];
             requests[n_new].id = n_new;
             Real_idx[n_new] = requests_20ft[remaining_node].id;
+
+            // std::cout << "Remaining unmatched node: " << remaining_node << "\n";
         }
         for (auto t : requests_origin)
             if (t.size == 40) {
@@ -1326,6 +1986,13 @@ class MinWeightMatching {
                 requests[n_new].id = n_new;
                 Real_idx[n_new] = t.id;
             }
+        // for(int i = 1; i <= n_new; i++)
+        //    cout << requests[i].id << " " << requests[i].size << " " << Real_idx[requests[i].id] << " " << Matched[Real_idx[requests[i].id]] << endl;
+        // for (int i = 1; i <= n_new; i++)
+        //     cout << i << " " << requests[i].id << " " << Real_idx[requests[i].id] << " " << Matched[Real_idx[requests[i].id]] << " " << requests[i].pickup_point << " " << actions[requests[i].pickup_action] << " " << requests[i].drop_point << " " << actions[requests[i].drop_action] << endl;
+        // cout << endl;
+        // std::cout << "Total weight: " << total_weight << "\n";
+        // std::cout << "Maximum edge weight: " << max_weight << "\n";
     }
 };
 
@@ -1521,7 +2188,7 @@ struct IO {
                          trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
-        // freopen("tc/3/out.txt", "w", stdout);
+        // freopen("tc/6/out.txt", "w", stdout);
 
         std::array<Route, MAX_VEHICLES> solution = solver.getSolution();
         std::cout << "ROUTES " << num_vehicles << std::endl;
@@ -1529,6 +2196,11 @@ struct IO {
             std::cout << "TRUCK " << i + 1 << std::endl;
             output_route(solution[i]);
         }
+        // for (size_t i = 0; i < num_vehicles; i++)
+        // {
+        //     std::cout << "TRUCK " << i + 1 << std::endl;
+        //     output_route1(solution[i]);
+        // }
     }
 
     void output1() {
@@ -1544,6 +2216,11 @@ struct IO {
             std::cout << "TRUCK " << i + 1 << std::endl;
             output_route1(solution[i]);
         }
+        // for (size_t i = 0; i < num_vehicles; i++)
+        // {
+        //     std::cout << "TRUCK " << i + 1 << std::endl;
+        //     output_route1(solution[i]);
+        // }
     }
     ll getDistance(int from, int to) {
         return distances[from][to];
@@ -1583,12 +2260,14 @@ struct IO {
         // 1. p1->d1->p2->d2 (pattern: 0011)
         combinations.push_back({req1_self_cost + req2_self_cost +
                                     dist_p1_d1 +
+                                    calculateRequestTransitionCost(req1, req2) +
                                     dist_p2_d2,
                                 0b0011});
 
         // 2. p2->d2->p1->d1 (pattern: 1100)
         combinations.push_back({req1_self_cost + req2_self_cost +
                                     dist_p2_d2 +
+                                    calculateRequestTransitionCost(req2, req1) +
                                     dist_p1_d1,
                                 0b1100});
 
@@ -1643,6 +2322,7 @@ struct IO {
         int i = 0;
         for (auto t : requests_20ft) {
             i++;
+            // cout << t.id << " " << t.pickup_point << " " << t.drop_point << endl;
             if (i == idx)
                 break;
         }
@@ -1676,9 +2356,9 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    // freopen("tc/3/inp.txt", "r", stdin);
+    // freopen("tc/6/inp.txt", "r", stdin);
 
-    IO io(100000, 1000000, 0);
+    IO io(100000, 10000, 0);
     io.input();
     if (n_total > 100) {
         io.pairMatching();

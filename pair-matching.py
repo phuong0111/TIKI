@@ -1,6 +1,4 @@
 import networkx as nx
-from collections import Counter
-from itertools import combinations, repeat
 
 def max_weight_matching(G, maxcardinality=False, weight="weight"):
     """Compute a maximum-weighted matching of G.
@@ -153,7 +151,7 @@ def max_weight_matching(G, maxcardinality=False, weight="weight"):
     # If b is a sub-blossom,
     # blossomparent[b] is its immediate parent (sub-)blossom.
     # If b is a top-level blossom, blossomparent[b] is None.
-    blossomparent = dict(zip(gnodes, repeat(None)))
+    blossomparent = dict(zip(gnodes, [None] * len(gnodes)))
 
     # If b is a (sub-)blossom,
     # blossombase[b] is its base VERTEX (i.e. recursive sub-blossom).
@@ -173,7 +171,7 @@ def max_weight_matching(G, maxcardinality=False, weight="weight"):
     # optimization problem (if all edge weights are integers, multiplication
     # by two ensures that all values remain integers throughout the algorithm).
     # Initially, u(v) = maxweight / 2.
-    dualvar = dict(zip(gnodes, repeat(maxweight)))
+    dualvar = dict(zip(gnodes, [maxweight] * len(gnodes)))
 
     # If b is a non-trivial blossom,
     # blossomdual[b] = z(b) where z(b) is b's variable in the dual
@@ -851,18 +849,24 @@ def matching_dict_to_set(matching):
         if (v, u) in edges or edge in edges:
             continue
         if u == v:
-            raise nx.NetworkXError(f"Selfloops cannot appear in matchings {edge}")
+            # raise nx.NetworkXError(f"Selfloops cannot appear in matchings {edge}")
+            raise IndexError(f"Selfloops cannot appear in matchings {edge}")
         edges.add(edge)
     return edges
 
 # Example usage
 if __name__ == "__main__":
+    import random
     # Create sample weighted graph
     G = nx.Graph()
     edges = [
-        (0, 1, 10), (0, 2, 20), (1, 2, 30),
-        (1, 3, 40), (2, 3, 50), (0, 3, 10)
+        # (0, 1, 10), (0, 2, 20), (1, 2, 30),
+        # (1, 3, 40), (2, 3, 50), (0, 3, 10)
     ]
+    n_vertices = 2 * 500
+    for i in range(n_vertices):
+        for j in range(i + 1, n_vertices):
+            G.add_edge(i, j, weight=random.randint(1, 5) * 10)
     G.add_weighted_edges_from(edges)
     
     try:
