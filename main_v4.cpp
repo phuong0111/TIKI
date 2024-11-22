@@ -623,7 +623,7 @@ class PDPSolver {
         for (int iter = 0; iter < max_iterations && currentTemp > 1e-8; iter++) {
             auto current_time = chrono::high_resolution_clock::now();
             double elapsed_time = chrono::duration_cast<chrono::milliseconds>(current_time - start_time).count() / 1000.0;
-            if (elapsed_time >= 29.50)
+            if (elapsed_time >= 25)
                 break;
             int numToRemove = max(2, min(40, static_cast<int>(0.1 + (0.3 * (rand() % 100) / 100.0) * requestIdx.size())));
 
@@ -667,7 +667,7 @@ class PDPSolver {
             //               << " Temp: " << currentTemp << endl;
 
             currentTemp *= coolingRate;
-            if (elapsed_time >= 29.50)
+            if (elapsed_time >= 25)
                 break;
         }
 
@@ -1200,49 +1200,305 @@ class MinWeightMatching {
     std::vector<std::vector<ll>> graph;
     int n;
 
+    class BlossomNode {
+      public:
+        int value;
+        int parent;
+        int mate;
+        bool mark;
+        bool in_blossom;
+        int blossom;
+
+        // Add default constructor
+        BlossomNode() : value(-1), parent(-1), mate(-1), mark(false),
+                        in_blossom(false), blossom(-1) {}
+
+        BlossomNode(int v) : value(v), parent(-1), mate(-1), mark(false),
+                             in_blossom(false), blossom(-1) {}
+    };
+
+    struct pair_hash {
+        template <class T1, class T2>
+        std::size_t operator()(const std::pair<T1, T2> &p) const {
+            return std::hash<T1>()(p.first) ^ std::hash<T2>()(p.second);
+        }
+    };
+
+    class WeightedGraph {
+      private:
+        std::unordered_map<int, std::vector<int>> graph;
+        std::unordered_map<std::pair<int, int>, int, pair_hash> weights;
+        std::unordered_set<int> vertices;
+
+      public:
+        void addEdge(int u, int v, int weight) {
+            graph[u].push_back(v);
+            graph[v].push_back(u);
+            weights[{u, v}] = weight;
+            weights[{v, u}] = weight;
+            vertices.insert(u);
+            vertices.insert(v);
+        }
+
+        std::vector<int> findAugmentingPath(int root,
+                                            std::unordered_map<int, BlossomNode> &nodes) {
+            std::queue<int> q;
+            q.push(root);
+            std::unordered_map<int, std::vector<int>> path;
+            path[root] = std::vector<int>();
+
+            while (!q.empty()) {
+                int vertex = q.front();
+                q.pop();
+
+                for (int neighbor : graph[vertex]) {
+                    if (path.find(neighbor) == path.end()) {
+                        BlossomNode &current = nodes[neighbor];
+                        if (current.mate == -1) {
+                            std::vector<int> augPath = path[vertex];
+                            augPath.push_back(vertex);
+                            augPath.push_back(neighbor);
+                            return augPath;
+                        } else if (path.find(neighbor) == path.end()) {
+                            path[neighbor] = path[vertex];
+                            path[neighbor].push_back(vertex);
+                            path[neighbor].push_back(neighbor);
+                            q.push(current.mate);
+                        }
+                    }
+                }
+            }
+            return std::vector<int>();
+        }
+
+        std::vector<int> findCycle(int start, int end,
+                                   std::unordered_map<int, BlossomNode> &nodes) {
+            std::unordered_map<int, std::vector<int>> visited;
+            std::queue<int> q;
+            visited[start] = {start};
+            q.push(start);
+
+            while (!q.empty()) {
+                int vertex = q.front();
+                q.pop();
+
+                for (int neighbor : graph[vertex]) {
+                    if (neighbor == end && visited[vertex].size() > 2) {
+                        std::vector<int> cycle = visited[vertex];
+                        cycle.push_back(end);
+                        return cycle;
+                    }
+                    if (visited.find(neighbor) == visited.end()) {
+                        visited[neighbor] = visited[vertex];
+                        visited[neighbor].push_back(neighbor);
+                        q.push(neighbor);
+                    }
+                }
+            }
+            return std::vector<int>();
+        }
+
+        std::unordered_set<int> contractBlossom(const std::vector<int> &cycle,
+                                                int base, std::unordered_map<int, BlossomNode> &nodes) {
+            std::unordered_set<int> blossom(cycle.begin(), cycle.end());
+            for (int vertex : cycle) {
+                nodes[vertex].in_blossom = true;
+                nodes[vertex].blossom = base;
+            }
+            return blossom;
+        }
+
+        void expandBlossom(const std::unordered_set<int> &blossom,
+                           std::unordered_map<int, int> &matching,
+                           int base, std::unordered_map<int, BlossomNode> &nodes) {
+            for (int v : blossom) {
+                nodes[v].in_blossom = false;
+                nodes[v].blossom = -1;
+            }
+
+            if (nodes[base].mate == -1)
+                return;
+
+            std::vector<int> blossomList(blossom.begin(), blossom.end());
+            auto baseIt = std::find(blossomList.begin(), blossomList.end(), base);
+            int baseIdx = std::distance(blossomList.begin(), baseIt);
+            int length = blossomList.size();
+
+            for (int i = 0; i < length; i++) {
+                int v = blossomList[i];
+                int nextV = blossomList[(i + 1) % length];
+
+                if (i % 2 == 0) {
+                    matching[v] = nextV;
+                    matching[nextV] = v;
+                    nodes[v].mate = nextV;
+                    nodes[nextV].mate = v;
+                }
+            }
+        }
+
+        std::pair<std::unordered_map<int, int>, int> findMaximumWeightedMatching() {
+            std::unordered_map<int, BlossomNode> nodes;
+            for (int v : vertices) {
+                nodes.emplace(v, BlossomNode(v));
+            }
+
+            std::unordered_map<int, int> matching;
+            std::priority_queue<std::tuple<int, int, int>> edges;
+
+            for (int u : vertices) {
+                for (int v : graph[u]) {
+                    if (u < v) {
+                        edges.push({weights[{u, v}], u, v});
+                    }
+                }
+            }
+
+            while (!edges.empty()) {
+                auto [weight, u, v] = edges.top();
+                edges.pop();
+
+                if (matching.find(u) == matching.end() &&
+                    matching.find(v) == matching.end()) {
+                    matching[u] = v;
+                    matching[v] = u;
+                    nodes[u].mate = v;
+                    nodes[v].mate = u;
+                }
+            }
+
+            while (true) {
+                bool augmented = false;
+                for (int v : vertices) {
+                    if (matching.find(v) == matching.end()) {
+                        std::vector<int> path = findAugmentingPath(v, nodes);
+                        if (!path.empty()) {
+                            for (size_t i = 0; i < path.size() - 1; i += 2) {
+                                int u = path[i], w = path[i + 1];
+                                matching[u] = w;
+                                matching[w] = u;
+                                nodes[u].mate = w;
+                                nodes[w].mate = u;
+                            }
+                            augmented = true;
+                            break;
+                        }
+
+                        for (int u : graph[v]) {
+                            if (nodes[u].in_blossom)
+                                continue;
+                            std::vector<int> cycle = findCycle(v, u, nodes);
+                            if (!cycle.empty()) {
+                                int base = cycle[0];
+                                contractBlossom(cycle, base, nodes);
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!augmented)
+                    break;
+            }
+
+            int totalWeight = 0;
+            for (const auto &[u, v] : matching) {
+                if (u < v) {
+                    totalWeight += weights[{u, v}];
+                }
+            }
+
+            return {matching, totalWeight};
+        }
+    };
+
   public:
     MinWeightMatching(const std::vector<std::vector<ll>> &adjacency_matrix)
         : graph(adjacency_matrix), n(adjacency_matrix.size()) {}
 
-    // Returns {matches, remaining_node_id}, where remaining_node_id is -1 if none
+    // // Returns {matches, remaining_node_id}, where remaining_node_id is -1 if none
+    // std::pair<std::vector<std::pair<int, int>>, int> findMinWeightMatching() {
+    //     std::vector<std::pair<int, int>> matches;
+    //     // Priority queue to store edges sorted by weight
+    //     std::priority_queue<Edge> edges;
+
+    //     // Add all edges to priority queue
+    //     for (int i = 0; i < n; i++) {
+    //         for (int j = i + 1; j < n; j++) {
+    //             edges.push(Edge(i, j, graph[i][j]));
+    //         }
+    //     }
+
+    //     // Keep track of matched nodes
+    //     std::set<int> matched;
+    //     bool is_odd = (n % 2 != 0);
+
+    //     // Greedily match nodes using smallest available edges
+    //     while (!edges.empty() && matched.size() < n - (is_odd ? 1 : 0)) {
+    //         Edge e = edges.top();
+    //         edges.pop();
+
+    //         // If both nodes are unmatched, match them
+    //         if (matched.find(e.u) == matched.end() &&
+    //             matched.find(e.v) == matched.end()) {
+    //             matches.push_back({e.u, e.v});
+    //             matched.insert(e.u);
+    //             matched.insert(e.v);
+    //         }
+    //     }
+
+    //     // Find remaining node if odd number of nodes
+    //     int remaining_node = -1;
+    //     if (is_odd) {
+    //         for (int i = 0; i < n; i++) {
+    //             if (matched.find(i) == matched.end()) {
+    //                 remaining_node = i;
+    //                 break;
+    //             }
+    //         }
+    //     }
+
+    //     return {matches, remaining_node};
+    // }
+
     std::pair<std::vector<std::pair<int, int>>, int> findMinWeightMatching() {
         std::vector<std::pair<int, int>> matches;
-        // Priority queue to store edges sorted by weight
-        std::priority_queue<Edge> edges;
+        bool is_odd = (n % 2 != 0);
+        ll max_weight = 0;
 
-        // Add all edges to priority queue
+        // Find maximum weight
         for (int i = 0; i < n; i++) {
             for (int j = i + 1; j < n; j++) {
-                edges.push(Edge(i, j, graph[i][j]));
+                max_weight = std::max(max_weight, graph[i][j]);
             }
         }
 
-        // Keep track of matched nodes
-        std::set<int> matched;
-        bool is_odd = (n % 2 != 0);
-
-        // Greedily match nodes using smallest available edges
-        while (!edges.empty() && matched.size() < n - (is_odd ? 1 : 0)) {
-            Edge e = edges.top();
-            edges.pop();
-
-            // If both nodes are unmatched, match them
-            if (matched.find(e.u) == matched.end() &&
-                matched.find(e.v) == matched.end()) {
-                matches.push_back({e.u, e.v});
-                matched.insert(e.u);
-                matched.insert(e.v);
+        // Create transformed graph with inverted weights
+        WeightedGraph transformed_graph;
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                int new_weight = max_weight + 1 - graph[i][j];
+                transformed_graph.addEdge(i, j, new_weight);
             }
         }
 
-        // Find remaining node if odd number of nodes
-        int remaining_node = -1;
         if (is_odd) {
             for (int i = 0; i < n; i++) {
-                if (matched.find(i) == matched.end()) {
-                    remaining_node = i;
-                    break;
-                }
+                transformed_graph.addEdge(i, n, 0);
+            }
+        }
+
+        // Find maximum weight matching on transformed graph
+        auto [max_matching, transformed_weight] = transformed_graph.findMaximumWeightedMatching();
+
+        // Convert matching to vector of pairs and calculate original weight
+        int remaining_node = -1;
+        int original_weight = 0;
+        for (const auto &[u, v] : max_matching) {
+            if (u < v) {
+                matches.push_back({u, v});
+                original_weight += graph[u][v];
+                if (v == n && is_odd)
+                    remaining_node = v;
             }
         }
 
@@ -1261,6 +1517,7 @@ class MinWeightMatching {
         for (const auto &match : matches) {
             int u = match.first;
             int v = match.second;
+            // std::cout << u << " " << v << "\n";
 
             ll weight = graph[u][v];
 
@@ -1676,7 +1933,7 @@ int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
     std::cout.tie(NULL);
-    // freopen("tc/3/inp.txt", "r", stdin);
+    // freopen("tc/3/inp.txt", "r", stdin); 
 
     IO io(100000, 1000000, 0);
     io.input();

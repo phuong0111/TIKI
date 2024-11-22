@@ -861,12 +861,12 @@ if __name__ == "__main__":
     G = nx.Graph()
     edges = [
         (0, 1, 10), (0, 2, 20), (1, 2, 30),
-        (1, 3, 40), (2, 3, 50), (0, 3, 10)
+        (1, 3, 40), (2, 3, 10), (0, 3, 10)
     ]
     G.add_weighted_edges_from(edges)
     
     try:
         matching = max_weight_matching(G, weight='weight')
-        print("Minimum weight matching:", matching)
+        print("Maximum weight matching:", matching)
     except nx.NetworkXError as e:
         print(f"Error: {e}")
