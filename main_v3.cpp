@@ -65,7 +65,6 @@ struct Route
     }
 };
 
-
 struct StopNode
 {
     int request_id;
@@ -88,8 +87,6 @@ struct StopNode
           duration(other.duration),
           next(nullptr) {}
 };
-
-
 
 struct Route1
 {
@@ -187,12 +184,11 @@ struct Route1
     }
 };
 
-
 struct RequestContext
 {
     int request_id;
     ll transitionCost;                 // Cost of transitions (prev->curr->next)
-    ll selfCost;                       // Cost of request itself (pickup + drop duration)
+    ll selfCost = 0;                   // Cost of request itself (pickup + drop duration)
     int routeIdx;                      // Which route this request is in
     std::list<int>::iterator position; // Position in route
 };
@@ -352,6 +348,52 @@ public:
         return route.cost + costDelta;
     }
 
+    ll calculateRemovalCost(Route &route, std::list<int>::iterator it)
+    {
+        if (it == route.list_reqs.end())
+            return route.cost; // Request not found
+
+        auto request_id = *it;
+        const Request &req = requests[request_id];
+        ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
+
+        if (route.list_reqs.size() == 1)
+        {
+            // If this is the only request
+            costDelta -= calculateDepotToRequestCost(route.depot, req);
+            costDelta -= calculateRequestToDepotCost(req, route.depot);
+            return 0; // Route will be empty
+        }
+
+        if (it == route.list_reqs.begin())
+        {
+            // If removing first request
+            const Request &next_req = requests[*std::next(it)];
+            costDelta -= calculateDepotToRequestCost(route.depot, req);
+            costDelta -= calculateRequestTransitionCost(req, next_req);
+            costDelta += calculateDepotToRequestCost(route.depot, next_req);
+        }
+        else if (std::next(it) == route.list_reqs.end())
+        {
+            // If removing last request
+            const Request &prev_req = requests[*std::prev(it)];
+            costDelta -= calculateRequestTransitionCost(prev_req, req);
+            costDelta -= calculateRequestToDepotCost(req, route.depot);
+            costDelta += calculateRequestToDepotCost(prev_req, route.depot);
+        }
+        else
+        {
+            // If removing from middle
+            const Request &prev_req = requests[*std::prev(it)];
+            const Request &next_req = requests[*std::next(it)];
+            costDelta -= calculateRequestTransitionCost(prev_req, req);
+            costDelta -= calculateRequestTransitionCost(req, next_req);
+            costDelta += calculateRequestTransitionCost(prev_req, next_req);
+        }
+
+        return route.cost + costDelta;
+    }
+
     void removeStopsByRequestId(Route &route, int request_id)
     {
         // Calculate new cost before modifying the list
@@ -359,6 +401,18 @@ public:
 
         // Remove the request
         route.list_reqs.remove(request_id);
+
+        // Update route cost
+        route.cost = newCost;
+    }
+
+    void removeStopsByRequestIt(Route &route, std::list<int>::iterator it)
+    {
+        // Calculate new cost before modifying the list
+        ll newCost = calculateRemovalCost(route, it);
+
+        // Remove the request
+        route.list_reqs.erase(it);
 
         // Update route cost
         route.cost = newCost;
@@ -432,7 +486,7 @@ public:
         context.position = it;
 
         const Request &curr_req = requests[req_id];
-        context.selfCost = calculateRequestContextCost(curr_req);
+        // context.selfCost = calculateRequestContextCost(curr_req);
 
         // Calculate transition cost
         ll transitionCost = 0;
@@ -522,8 +576,7 @@ public:
                 if (!isRequestRemoved[req_id])
                 {
                     updateRequestContext(req_id, route, it);
-                    routeRequestCosts.push_back({requestContexts[req_id].transitionCost + requestContexts[req_id].selfCost,
-                                                 req_id});
+                    routeRequestCosts.push_back({requestContexts[req_id].transitionCost, req_id});
                 }
             }
 
@@ -540,17 +593,20 @@ public:
 
                 // Store prev and next request IDs before removal
                 auto currentPos = requestContexts[selectedRequestId].position;
+                auto prevPos = currentPos, nextPos = currentPos;
                 int prevRequestId = -1, nextRequestId = -1;
                 bool hasPrev = currentPos != route.list_reqs.begin();
                 bool hasNext = std::next(currentPos) != route.list_reqs.end();
 
                 if (hasPrev)
                 {
-                    prevRequestId = *std::prev(currentPos);
+                    prevPos = std::prev(currentPos);
+                    prevRequestId = *prevPos;
                 }
                 if (hasNext)
                 {
-                    nextRequestId = *std::next(currentPos);
+                    nextPos = std::next(currentPos);
+                    nextRequestId = *nextPos;
                 }
 
                 // Remove request
@@ -559,22 +615,13 @@ public:
                 isRequestRemoved[selectedRequestId] = true;
 
                 // Update contexts of adjacent requests after removal
-                if (hasPrev && hasNext)
+                if (hasPrev)
                 {
-                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), prevRequestId);
-                    updateRequestContext(prevRequestId, route, it);
-                    it = std::find(route.list_reqs.begin(), route.list_reqs.end(), nextRequestId);
-                    updateRequestContext(nextRequestId, route, it);
+                    updateRequestContext(prevRequestId, route, prevPos);
                 }
-                else if (hasPrev)
+                if (hasNext)
                 {
-                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), prevRequestId);
-                    updateRequestContext(prevRequestId, route, it);
-                }
-                else if (hasNext)
-                {
-                    auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), nextRequestId);
-                    updateRequestContext(nextRequestId, route, it);
+                    updateRequestContext(nextRequestId, route, nextPos);
                 }
             }
             attempt++;
@@ -616,10 +663,11 @@ public:
             if (bestRoute != -1)
             {
                 Route &route = currentSolution[bestRoute];
-                route.list_reqs.insert(bestPosition, req_id);
+                bestPosition = route.list_reqs.insert(bestPosition, req_id);
                 route.cost = bestCost;
                 isRequestRemoved[req_id] = false;
-                updateRequestContext(req_id, route, bestPosition);
+                requestContexts[req_id].position = bestPosition;
+                requestContexts[req_id].routeIdx = bestRoute;
             }
         }
     }
@@ -695,7 +743,7 @@ public:
         {
             auto current_time = chrono::high_resolution_clock::now();
             double elapsed_time = chrono::duration_cast<chrono::milliseconds>(current_time - start_time).count() / 1000.0;
-            if (elapsed_time >= 29)
+            if (elapsed_time >= 29.50)
                 break;
             int numToRemove = max(2, min(40, static_cast<int>(0.1 + (0.3 * (rand() % 100) / 100.0) * requestIdx.size())));
 
@@ -749,7 +797,7 @@ public:
             //               << " Temp: " << currentTemp << endl;
 
             currentTemp *= coolingRate;
-            if (elapsed_time >= 29)
+            if (elapsed_time >= 29.50)
                 break;
         }
 
@@ -762,13 +810,10 @@ public:
     }
 };
 
- 
-
-
 class PDPSolver1
 {
 private:
-    std::array<Request, MAX_REQUESTS>  requests;
+    std::array<Request, MAX_REQUESTS> requests;
     int num_vehicles;
     std::random_device rd;
     std::mt19937 gen;
@@ -1252,13 +1297,13 @@ public:
         return alpha * calculateF1() + calculateF2();
     }
 
-    PDPSolver1(std::array<Request, MAX_REQUESTS>  &requests,
-              int num_vehicles,
-              int alpha,
-              int trailer_point,
-              int trailer_pickup_time,
-              int max_iterations,
-              bool verbose)
+    PDPSolver1(std::array<Request, MAX_REQUESTS> &requests,
+               int num_vehicles,
+               int alpha,
+               int trailer_point,
+               int trailer_pickup_time,
+               int max_iterations,
+               bool verbose)
         : requests(requests),
           num_vehicles(num_vehicles),
           alpha(alpha),
@@ -1274,75 +1319,86 @@ public:
         }
     }
 
- void solve() {
-    auto start_time = chrono::high_resolution_clock::now();
+    void solve()
+    {
+        auto start_time = chrono::high_resolution_clock::now();
 
-    vector<int> unassignedRequests;
-    for (const Request &req : requests) {
-        unassignedRequests.push_back(req.id);
-    }
-    insertRequests(unassignedRequests);
-
-    double currentTemp = temperature;
-    ll currentSolutionCost = calculateSolutionCost();
-    auto bestSolution = currentSolution1;
-    ll bestSolutionCost = currentSolutionCost;
-    ll bestTotalCost = calculateF2();  // Thêm biến để lưu tổng chi phí tốt nhất
-
-    for (int iter = 0; iter < max_iterations && currentTemp > 1e-8; iter++) {
-        auto current_time = chrono::high_resolution_clock::now();
-        double elapsed_time = chrono::duration_cast<chrono::milliseconds>(current_time - start_time).count() / 1000.0;
-        if (elapsed_time >= 29)
-            break;
-        int numToRemove = max(2, min(40, static_cast<int>(0.1 + (0.3 * (rand() % 100) / 100.0) * requests.size())));
-
-        vector<int> removedRequests;
-        removeRandomRequests(removedRequests, numToRemove);
-        insertRequests(removedRequests);
-
-        ll newSolutionCost = calculateSolutionCost();
-        ll newTotalCost = calculateF2();  // Tính tổng chi phí của solution mới
-
-        if (newSolutionCost < bestSolutionCost) {
-            bestSolution = currentSolution1;
-            bestSolutionCost = newSolutionCost;
-            bestTotalCost = newTotalCost;
-            currentSolutionCost = newSolutionCost;
+        vector<int> unassignedRequests;
+        for (const Request &req : requests)
+        {
+            unassignedRequests.push_back(req.id);
         }
-        else if (newSolutionCost == bestSolutionCost) {
-            // Nếu có cùng chi phí max, so sánh tổng chi phí
-            if (newTotalCost < bestTotalCost) {
+        insertRequests(unassignedRequests);
+
+        double currentTemp = temperature;
+        ll currentSolutionCost = calculateSolutionCost();
+        auto bestSolution = currentSolution1;
+        ll bestSolutionCost = currentSolutionCost;
+        ll bestTotalCost = calculateF2(); // Thêm biến để lưu tổng chi phí tốt nhất
+
+        for (int iter = 0; iter < max_iterations && currentTemp > 1e-8; iter++)
+        {
+            auto current_time = chrono::high_resolution_clock::now();
+            double elapsed_time = chrono::duration_cast<chrono::milliseconds>(current_time - start_time).count() / 1000.0;
+            if (elapsed_time >= 29)
+                break;
+            int numToRemove = max(2, min(40, static_cast<int>(0.1 + (0.3 * (rand() % 100) / 100.0) * requests.size())));
+
+            vector<int> removedRequests;
+            removeRandomRequests(removedRequests, numToRemove);
+            insertRequests(removedRequests);
+
+            ll newSolutionCost = calculateSolutionCost();
+            ll newTotalCost = calculateF2(); // Tính tổng chi phí của solution mới
+
+            if (newSolutionCost < bestSolutionCost)
+            {
                 bestSolution = currentSolution1;
                 bestSolutionCost = newSolutionCost;
                 bestTotalCost = newTotalCost;
                 currentSolutionCost = newSolutionCost;
             }
-        }
-        else {
-            if (currentTemp > 1e-8) {
-                double acceptanceProbability = exp((currentSolutionCost - newSolutionCost) / currentTemp);
-                uniform_real_distribution<> dist(0, 1);
-                if (dist(gen) < acceptanceProbability) {
+            else if (newSolutionCost == bestSolutionCost)
+            {
+                // Nếu có cùng chi phí max, so sánh tổng chi phí
+                if (newTotalCost < bestTotalCost)
+                {
+                    bestSolution = currentSolution1;
+                    bestSolutionCost = newSolutionCost;
+                    bestTotalCost = newTotalCost;
                     currentSolutionCost = newSolutionCost;
-                } else {
-                    currentSolution1 = bestSolution;
                 }
             }
+            else
+            {
+                if (currentTemp > 1e-8)
+                {
+                    double acceptanceProbability = exp((currentSolutionCost - newSolutionCost) / currentTemp);
+                    uniform_real_distribution<> dist(0, 1);
+                    if (dist(gen) < acceptanceProbability)
+                    {
+                        currentSolutionCost = newSolutionCost;
+                    }
+                    else
+                    {
+                        currentSolution1 = bestSolution;
+                    }
+                }
+            }
+
+            // cerr << "Iter: " << iter
+            //     << " Cost: " << bestSolutionCost
+            //     << " Total: " << bestTotalCost
+            //     << " Time: " << fixed << setprecision(2) << elapsed_time << "s"
+            //     << " Temp: " << currentTemp << endl;
+
+            currentTemp *= coolingRate;
+            if (elapsed_time >= 29)
+                break;
         }
 
-        // cerr << "Iter: " << iter 
-        //     << " Cost: " << bestSolutionCost 
-        //     << " Total: " << bestTotalCost
-        //     << " Time: " << fixed << setprecision(2) << elapsed_time << "s"
-        //     << " Temp: " << currentTemp << endl;
-
-        currentTemp *= coolingRate;
-        if (elapsed_time >= 29)
-            break;
+        currentSolution1 = bestSolution;
     }
-
-    currentSolution1 = bestSolution;
-}
 
     std::array<Route1, MAX_VEHICLES> getSolution()
     {
@@ -1359,77 +1415,117 @@ struct Edge
     // Operator for sorting edges by weight
     bool operator<(const Edge &other) const
     {
-        return weight > other.weight; // Use > for min-heap
+        return weight < other.weight; // Use > for min-heap
     }
 };
 
 class MinWeightMatching
 {
 private:
-    std::vector<std::vector<ll>> graph;
-    int n; // Original number of nodes
+    vector<vector<ll>> graph;
+    int n;
+    vector<bool> removed;
 
 public:
-    MinWeightMatching(const std::vector<std::vector<ll>> &adjacency_matrix)
-        : graph(adjacency_matrix), n(adjacency_matrix.size()) {}
+    MinWeightMatching(const vector<vector<ll>> &adjacency_matrix)
+        : graph(adjacency_matrix), n(adjacency_matrix.size()), removed(n, false) {}
 
-    // Returns {matches, remaining_node_id}, where remaining_node_id is -1 if none
-    std::pair<std::vector<std::pair<int, int>>, int> findMinWeightMatching()
+    std::pair<std::vector<std::pair<int, int>>, vector<int>> findMinWeightMatching()
     {
         std::vector<std::pair<int, int>> matches;
         // Priority queue to store edges sorted by weight
-        std::priority_queue<Edge> edges;
-
+        // std::priority_queue<Edge> edges;
+        vector<Edge> edges;
         // Add all edges to priority queue
         for (int i = 0; i < n; i++)
         {
             for (int j = i + 1; j < n; j++)
             {
-                edges.push(Edge(i, j, graph[i][j]));
+                edges.push_back(Edge(i, j, graph[i][j]));
             }
         }
-
+        sort(edges.begin(), edges.end());
         // Keep track of matched nodes
         std::set<int> matched;
         bool is_odd = (n % 2 != 0);
-
-        // Greedily match nodes using smallest available edges
-        while (!edges.empty() && matched.size() < n - (is_odd ? 1 : 0))
+        int vt = -1, weightMin = 2000000009, dd[1005];
+        // Greedily match nodes using smallest available edges 
+        int t = edges.size();
+        for (int i = 0; i < min(50, t); i++)
         {
-            Edge e = edges.top();
-            edges.pop();
-
-            // If both nodes are unmatched, match them
-            if (matched.find(e.u) == matched.end() &&
-                matched.find(e.v) == matched.end())
+            int CurrentWeight = 0;
+            CurrentWeight += edges[i].weight;
+            for (int j = 0; j < n; j++)
+                dd[j] = 0;
+            int u = edges[i].u, v = edges[i].v;
+            if (combinationType[u][v] == 0b0011 || combinationType[u][v] == 0b1100){
+                continue;
+            }
+            dd[edges[i].u] = 1;
+            dd[edges[i].v] = 1;
+            int Count = 2;
+            for (int j = 0; j < edges.size(); j++)
             {
-                matches.push_back({e.u, e.v});
-                matched.insert(e.u);
-                matched.insert(e.v);
+                if (dd[edges[j].u] == 0 && dd[edges[j].v] == 0)
+                {
+                    Count += 2;
+                    dd[edges[j].u] = 1;
+                    dd[edges[j].v] = 1;
+                    CurrentWeight += edges[j].weight;
+                }
+                if (Count == n - (is_odd ? 1 : 0))
+                    break;
+            }
+            if (weightMin > CurrentWeight)
+            {
+                weightMin = CurrentWeight;
+                vt = i;
             }
         }
-
+        for (int j = 0; j < n; j++)
+            dd[j] = 0; 
+        dd[edges[vt].u] = 1;
+        dd[edges[vt].v] = 1;
+        int u = edges[vt].u, v = edges[vt].v;
+        if (u > v)
+            swap(u, v);
+        matches.push_back({u, v});
+        int Count = 2;
+         for (int j = 0; j < edges.size(); j++)
+        {
+            if (dd[edges[j].u] == 0 && dd[edges[j].v] == 0)
+            {
+                int u = edges[j].u, v = edges[j].v; 
+                if (u > v)
+                    swap(u, v);
+                matches.push_back({u, v});
+                Count += 2;
+                dd[edges[j].u] = 1;
+                dd[edges[j].v] = 1;
+            }
+            if (Count == n - (is_odd ? 1 : 0))
+                break;
+        } 
         // Find remaining node if odd number of nodes
-        int remaining_node = -1;
+        vector<int> remaining_node;
         if (is_odd)
         {
             for (int i = 0; i < n; i++)
             {
-                if (matched.find(i) == matched.end())
+                if (dd[i] == 0)
                 {
-                    remaining_node = i;
-                    break;
+                    remaining_node.push_back(i); 
                 }
             }
-        }
+        }  
         return {matches, remaining_node};
     }
-    ContainerSize getContaierSize(int size)
+    ContainerSize getContainerSize(int size)
     {
         return size == 20 ? TWENTY_FT : FORTY_FT;
     }
 
-    void printMatchingStats(const std::vector<std::pair<int, int>> &matches, int remaining_node = -1)
+    void printMatchingStats(const std::vector<std::pair<int, int>> &matches, vector<int> remaining_node)
     {
         ll total_weight = 0;
         ll max_weight = -1;
@@ -1490,21 +1586,20 @@ public:
             }
             Request request = {
                 ++n_new,
-                getContaierSize(40),
+                getContainerSize(40),
                 pickup_point,
                 pickup_action,
-                graphWeight[u][v],
+                graphWeight[u][v] - distances[pickup_point][drop_point],
                 drop_point,
                 drop_action,
                 0};
             requests[n_new] = request;
             Real_idx[n_new] = requests_20ft[u].id;
         }
-        if (remaining_node != -1)
-        {
-            requests[++n_new] = requests_20ft[remaining_node];
+        for(auto t: remaining_node){
+            requests[++n_new] = requests_20ft[t];
             requests[n_new].id = n_new;
-            Real_idx[n_new] = requests_20ft[remaining_node].id;
+            Real_idx[n_new] = requests_20ft[t].id;
 
             // std::cout << "Remaining unmatched node: " << remaining_node << "\n";
         }
@@ -1551,7 +1646,7 @@ struct IO
         return DROP_CONTAINER_TRAILER;
     }
 
-    ContainerSize getContaierSize(int size)
+    ContainerSize getContainerSize(int size)
     {
         return size == 20 ? TWENTY_FT : FORTY_FT;
     }
@@ -1590,7 +1685,7 @@ struct IO
             // cout << id << endl;
             Request request = {
                 id,
-                getContaierSize(size),
+                getContainerSize(size),
                 pickup_point,
                 getAction(pickup_action),
                 pickup_duration,
@@ -1755,10 +1850,11 @@ struct IO
         //     output_route1(solution[i]);
         // }
     }
-        void output1()
+
+    void output1()
     {
         PDPSolver1 solver(requests_origin, num_vehicles, alpha, trailer_point,
-                         trailer_pickup_time, max_iterations, verbose);
+                          trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
         // freopen("/media/nhdandz/Data/Hackathon/TIKI/tc/5/out.txt", "w", stdout);
@@ -1913,11 +2009,7 @@ struct IO
         matcher.printMatchingStats(matches, remaining_node);
         for (int i = 1; i <= n_new; i++)
             requestIdx.push_back(requests[i].id);
-        // Handle the remaining node if needed
-        if (remaining_node != -1)
-        {
-            // Process requests_20ft[remaining_node] separately
-        }
+        // Handle the remaining node if needed 
     }
 };
 
@@ -1925,18 +2017,13 @@ int main()
 {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
-    std::cout.tie(NULL);
-    // freopen("/media/nhdandz/Data/Hackathon/TIKI/tc/1/inp.txt", "r", stdin);
-
-    IO io(100000, 10000000, 0);
+    std::cout.tie(NULL); 
+   IO io(100000, 100000, 0);
     io.input();
-    if(n_total > 100)
-    {
+    if (n_total > 100) {
         io.pairMatching();
         io.output();
-    }
-    else
+    } else
         io.output1();
-
     return 0;
 }
