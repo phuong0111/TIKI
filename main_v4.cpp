@@ -108,7 +108,7 @@ struct Route1 {
         return stops.size();
     }
 
-    // Helper function for PDPSolver1's isRouteValid
+    // Helper function for PDPSolver_subtask_12's isRouteValid
     bool empty() const {
         return stops.empty();
     }
@@ -147,7 +147,6 @@ struct Route1 {
 struct RequestContext {
     int request_id;
     ll transitionCost;                 // Cost of transitions (prev->curr->next)
-    ll selfCost = 0;                   // Cost of request itself (pickup + drop duration)
     int routeIdx;                      // Which route this request is in
     std::list<int>::iterator position; // Position in route
 };
@@ -155,7 +154,7 @@ struct RequestContext {
 std::array<std::array<ll, MAX_POINT>, MAX_POINT> distances;
 std::array<int, MAX_VEHICLES> vehicleDepots;
 std::array<int, MAX_REQUESTS> Matched, Real_idx;
-std::array<Route1, MAX_VEHICLES> currentSolution1;
+// std::array<Route1, MAX_VEHICLES> currentSolution;
 
 std::array<Route, MAX_VEHICLES> currentSolution;
 std::array<Request, MAX_REQUESTS> requests, requests_20ft, requests_origin;
@@ -165,7 +164,19 @@ std::vector<std::vector<ll>> graphWeight;
 std::vector<std::vector<int>> combinationType;
 int idx = 0, n_new = 0, n_total = 0;
 
-class PDPSolver {
+// // Cache arrays
+// std::array<ll, MAX_REQUESTS> request_context_cache;
+// std::array<std::array<ll, MAX_REQUESTS>, MAX_POINT> depot_to_request_cache;
+// std::array<std::array<ll, MAX_POINT>, MAX_REQUESTS> request_to_depot_cache;
+// std::array<std::array<ll, MAX_REQUESTS>, MAX_REQUESTS> request_transition_cache;
+
+// // Cache validation arrays
+// std::array<bool, MAX_REQUESTS> request_context_valid;
+// std::array<std::array<bool, MAX_REQUESTS>, MAX_POINT> depot_to_request_valid;
+// std::array<std::array<bool, MAX_POINT>, MAX_REQUESTS> request_to_depot_valid;
+// std::array<std::array<bool, MAX_REQUESTS>, MAX_REQUESTS> request_transition_valid;
+
+class PDPSolver_subtask_3 {
   private:
     std::vector<int> requestIdx;
     int num_vehicles;
@@ -187,27 +198,74 @@ class PDPSolver {
     }
 
     ll calculateRequestContextCost(const Request &req) {
-        return req.pickup_duration + req.drop_duration + getDistance(req.pickup_point, req.drop_point);
+        // if (request_context_valid[req.id]) {
+        //     return request_context_cache[req.id];
+        // }
+        ll cost = req.pickup_duration + req.drop_duration +
+                  getDistance(req.pickup_point, req.drop_point);
+        // request_context_cache[req.id] = cost;
+        // request_context_valid[req.id] = true;
+        return cost;
     }
 
     ll calculateDepotToRequestCost(const int &depot, const Request &req) {
-        if (req.pickup_action == PICKUP_CONTAINER)
-            return getDistance(depot, trailer_point) + trailer_pickup_time + getDistance(trailer_point, req.pickup_point);
-        return getDistance(depot, req.pickup_point); // PICKUP_CONTAINER_TRAILER
+        // if (depot_to_request_valid[depot][req.id]) {
+        //     return depot_to_request_cache[depot][req.id];
+        // }
+
+        ll cost;
+        if (req.pickup_action == PICKUP_CONTAINER) {
+            cost = getDistance(depot, trailer_point) +
+                   trailer_pickup_time +
+                   getDistance(trailer_point, req.pickup_point);
+        } else {
+            cost = getDistance(depot, req.pickup_point);
+        }
+        // depot_to_request_cache[depot][req.id] = cost;
+        // depot_to_request_valid[depot][req.id] = true;
+        return cost;
     }
 
     ll calculateRequestToDepotCost(const Request &req, const int &depot) {
-        if (req.drop_action == DROP_CONTAINER)
-            return getDistance(req.drop_point, trailer_point) + trailer_pickup_time + getDistance(trailer_point, depot);
-        return getDistance(req.drop_point, depot); // DROP_CONTAINER_TRAILER
+        //     if (request_to_depot_valid[req.id][depot]) {
+        //         return request_to_depot_cache[req.id][depot];
+        //     }
+
+        ll cost;
+        if (req.drop_action == DROP_CONTAINER) {
+            cost = getDistance(req.drop_point, trailer_point) +
+                   trailer_pickup_time +
+                   getDistance(trailer_point, depot);
+        } else {
+            cost = getDistance(req.drop_point, depot);
+        }
+        //     request_to_depot_cache[req.id][depot] = cost;
+        //     request_to_depot_valid[req.id][depot] = true;
+        return cost;
     }
 
     ll calculateRequestTransitionCost(const Request &curr_req, const Request &next_req) {
-        if (curr_req.drop_action == DROP_CONTAINER && next_req.pickup_action == PICKUP_CONTAINER_TRAILER)
-            return getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
-        if (curr_req.drop_action == DROP_CONTAINER_TRAILER && next_req.pickup_action == PICKUP_CONTAINER)
-            return getDistance(curr_req.drop_point, trailer_point) + getDistance(trailer_point, next_req.pickup_point) + trailer_pickup_time;
-        return getDistance(curr_req.drop_point, next_req.pickup_point);
+        // if (request_transition_valid[curr_req.id][next_req.id]) {
+        //     return request_transition_cache[curr_req.id][next_req.id];
+        // }
+
+        ll cost;
+        if (curr_req.drop_action == DROP_CONTAINER &&
+            next_req.pickup_action == PICKUP_CONTAINER_TRAILER) {
+            cost = getDistance(curr_req.drop_point, trailer_point) +
+                   getDistance(trailer_point, next_req.pickup_point) +
+                   trailer_pickup_time;
+        } else if (curr_req.drop_action == DROP_CONTAINER_TRAILER &&
+                   next_req.pickup_action == PICKUP_CONTAINER) {
+            cost = getDistance(curr_req.drop_point, trailer_point) +
+                   getDistance(trailer_point, next_req.pickup_point) +
+                   trailer_pickup_time;
+        } else {
+            cost = getDistance(curr_req.drop_point, next_req.pickup_point);
+        }
+        // request_transition_cache[curr_req.id][next_req.id] = cost;
+        // request_transition_valid[curr_req.id][next_req.id] = true;
+        return cost;
     }
 
     ll calculateInsertionCost(const Route &route, const int request_id, std::list<int>::iterator position) {
@@ -408,7 +466,6 @@ class PDPSolver {
         context.position = it;
 
         const Request &curr_req = requests[req_id];
-        // context.selfCost = calculateRequestContextCost(curr_req);
 
         // Calculate transition cost
         ll transitionCost = 0;
@@ -589,13 +646,20 @@ class PDPSolver {
         return alpha * calculateF1() + calculateF2();
     }
 
-    PDPSolver(const std::vector<int> &requestIdx,
-              int num_vehicles,
-              int alpha,
-              int trailer_point,
-              int trailer_pickup_time,
-              int max_iterations,
-              bool verbose)
+    void clearCaches() {
+        // request_context_valid.fill(false);
+        // depot_to_request_valid.fill(std::array<bool, MAX_REQUESTS>());
+        // request_to_depot_valid.fill(std::array<bool, MAX_POINT>());
+        // request_transition_valid.fill(std::array<bool, MAX_REQUESTS>());
+    }
+
+    PDPSolver_subtask_3(const std::vector<int> &requestIdx,
+                        int num_vehicles,
+                        int alpha,
+                        int trailer_point,
+                        int trailer_pickup_time,
+                        int max_iterations,
+                        bool verbose)
         : requestIdx(requestIdx),
           num_vehicles(num_vehicles),
           alpha(alpha),
@@ -607,9 +671,12 @@ class PDPSolver {
         for (int i = 0; i < num_vehicles; i++) {
             currentSolution[i].depot = vehicleDepots[i];
         }
+        clearCaches();
     }
 
-    PDPSolver() {}
+    PDPSolver_subtask_3() {
+        clearCaches();
+    }
 
     void solve() {
         // Initialize removal status
@@ -625,7 +692,7 @@ class PDPSolver {
         for (int iter = 0; iter < max_iterations && currentTemp > 1e-8; iter++) {
             auto current_time = chrono::high_resolution_clock::now();
             double elapsed_time = chrono::duration_cast<chrono::milliseconds>(current_time - start_time).count() / 1000.0;
-            if (elapsed_time >= 29.50)
+            if (elapsed_time >= 29.90)
                 break;
             int numToRemove = max(2, min(40, static_cast<int>(0.1 + (0.3 * (rand() % 100) / 100.0) * requestIdx.size())));
 
@@ -669,7 +736,7 @@ class PDPSolver {
             //               << " Temp: " << currentTemp << endl;
 
             currentTemp *= coolingRate;
-            if (elapsed_time >= 29.50)
+            if (elapsed_time >= 29.90)
                 break;
         }
 
@@ -681,10 +748,10 @@ class PDPSolver {
     }
 };
 
-class PDPSolver1 {
+class PDPSolver_subtask_12 {
   private:
     std::array<Request, MAX_REQUESTS> requests;
-    std::array<Route1, MAX_VEHICLES> currentSolution1;
+    std::array<Route1, MAX_VEHICLES> currentSolution;
     int num_vehicles;
     std::random_device rd;
     std::mt19937 gen;
@@ -825,7 +892,7 @@ class PDPSolver1 {
 
         while (attempt++ < max_attempt) {
             int routeIdx = routeDist(gen);
-            Route1 &route = currentSolution1[routeIdx];
+            Route1 &route = currentSolution[routeIdx];
 
             if (!route.stops.empty()) {
                 std::vector<int> validRequestIds;
@@ -876,7 +943,7 @@ class PDPSolver1 {
             Route1 bestRouteConfig;
 
             for (size_t routeIdx = 0; routeIdx < num_vehicles; routeIdx++) {
-                Route1 &route = currentSolution1[routeIdx];
+                Route1 &route = currentSolution[routeIdx];
                 size_t routeSize = route.size();
 
                 for (size_t pickup_pos = 0; pickup_pos <= routeSize; pickup_pos++) {
@@ -902,53 +969,22 @@ class PDPSolver1 {
                                 }
                             }
                         }
-
-                        // Try container with trailer operations
-                        {
-                            Route1 testRoute = route;
-
-                            if (req.pickup_action == PICKUP_CONTAINER_TRAILER) {
-                                testRoute.insertStop(
-                                    StopNode(-1, NONE, trailer_point, DROP_TRAILER, trailer_pickup_time),
-                                    pickup_pos);
-                            } else {
-                                testRoute.insertStop(
-                                    StopNode(-1, NONE, trailer_point, PICKUP_TRAILER, trailer_pickup_time),
-                                    pickup_pos);
-                            }
-
-                            testRoute.insertStop(
-                                StopNode(req_id, req.size, req.pickup_point, req.pickup_action, req.pickup_duration),
-                                pickup_pos + 1);
-                            testRoute.insertStop(
-                                StopNode(req_id, req.size, req.drop_point, req.drop_action, req.drop_duration),
-                                delivery_pos + 2);
-
-                            updateTrailerOperations(testRoute);
-
-                            if (isRouteValid(testRoute)) {
-                                ll newCost = calculateRouteCost(testRoute);
-                                if (newCost < bestCost) {
-                                    bestCost = newCost;
-                                    bestRoute = routeIdx;
-                                    bestRouteConfig = testRoute;
-                                }
-                            }
-                        }
+                        if (req.size == FORTY_FT)
+                            break;
                     }
                 }
             }
 
             if (bestRoute != -1) {
-                currentSolution1[bestRoute] = bestRouteConfig;
-                currentSolution1[bestRoute].cost = calculateRouteCost(currentSolution1[bestRoute]);
+                currentSolution[bestRoute] = bestRouteConfig;
+                currentSolution[bestRoute].cost = calculateRouteCost(currentSolution[bestRoute]);
             }
         }
     }
 
     ll calculateF1() {
         ll maxCost = 0;
-        for (const Route1 &route : currentSolution1) {
+        for (const Route1 &route : currentSolution) {
             maxCost = std::max(maxCost, route.cost);
         }
         return maxCost;
@@ -956,7 +992,7 @@ class PDPSolver1 {
 
     ll calculateF2() {
         ll totalCost = 0;
-        for (const Route1 &route : currentSolution1) {
+        for (const Route1 &route : currentSolution) {
             totalCost += route.cost;
         }
         return totalCost;
@@ -966,13 +1002,13 @@ class PDPSolver1 {
         return alpha * calculateF1() + calculateF2();
     }
 
-    PDPSolver1(std::array<Request, MAX_REQUESTS> &requests,
-               int num_vehicles,
-               int alpha,
-               int trailer_point,
-               int trailer_pickup_time,
-               int max_iterations,
-               bool verbose)
+    PDPSolver_subtask_12(std::array<Request, MAX_REQUESTS> &requests,
+                         int num_vehicles,
+                         int alpha,
+                         int trailer_point,
+                         int trailer_pickup_time,
+                         int max_iterations,
+                         bool verbose)
         : requests(requests),
           num_vehicles(num_vehicles),
           alpha(alpha),
@@ -982,11 +1018,11 @@ class PDPSolver1 {
           verbose(verbose),
           gen(rd()) {
         for (int i = 0; i < num_vehicles; i++) {
-            currentSolution1[i].depot = vehicleDepots[i];
+            currentSolution[i].depot = vehicleDepots[i];
         }
     }
 
-    void solve() {
+    void solve_subtask_2() {
         std::vector<int> unassignedRequests;
         for (const Request &req : requests) {
             unassignedRequests.push_back(req.id);
@@ -995,14 +1031,14 @@ class PDPSolver1 {
 
         double currentTemp = temperature;
         ll currentSolutionCost = calculateSolutionCost();
-        auto bestSolution = currentSolution1;
+        auto bestSolution = currentSolution;
         ll bestSolutionCost = currentSolutionCost;
         ll bestTotalCost = calculateF2();
 
         for (int iter = 0; iter < max_iterations && currentTemp > 1e-8; iter++) {
             auto current_time = std::chrono::high_resolution_clock::now();
             double elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count() / 1000.0;
-            if (elapsed_time >= 29.50)
+            if (elapsed_time >= 29.90)
                 break;
 
             int numToRemove = std::max(2, std::min(40, static_cast<int>(0.1 + (0.3 * (rand() % 100) / 100.0) * requests.size())));
@@ -1016,7 +1052,7 @@ class PDPSolver1 {
 
             if (newSolutionCost < bestSolutionCost ||
                 (newSolutionCost == bestSolutionCost && newTotalCost < bestTotalCost)) {
-                bestSolution = currentSolution1;
+                bestSolution = currentSolution;
                 bestSolutionCost = newSolutionCost;
                 bestTotalCost = newTotalCost;
                 currentSolutionCost = newSolutionCost;
@@ -1027,21 +1063,65 @@ class PDPSolver1 {
                     if (dist(gen) < acceptanceProbability) {
                         currentSolutionCost = newSolutionCost;
                     } else {
-                        currentSolution1 = bestSolution;
+                        currentSolution = bestSolution;
                     }
                 }
             }
 
             currentTemp *= coolingRate;
-            if (elapsed_time >= 29.50)
+            if (elapsed_time >= 29.90)
                 break;
         }
 
-        currentSolution1 = bestSolution;
+        currentSolution = bestSolution;
+    }
+
+    void solve_subtask_1() {
+        std::vector<int> unassignedRequests;
+        for (const Request &req : requests) {
+            unassignedRequests.push_back(req.id);
+        }
+        insertRequests(unassignedRequests);
+
+        double currentTemp = temperature;
+        ll currentSolutionCost = calculateSolutionCost();
+        auto bestSolution = currentSolution;
+        ll bestSolutionCost = currentSolutionCost;
+        ll bestTotalCost = calculateF2();
+
+        for (int iter = 0; iter < max_iterations && currentTemp > 1e-8; iter++) {
+            auto current_time = std::chrono::high_resolution_clock::now();
+            double elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count() / 1000.0;
+            if (elapsed_time >= 29.90)
+                break;
+
+            for (int i = 0; i < num_vehicles; i++) {
+                currentSolution[i].stops.clear();
+                currentSolution[i].cost = 0;
+            }
+            insertRequests(unassignedRequests);
+
+            ll newSolutionCost = calculateSolutionCost();
+            ll newTotalCost = calculateF2();
+
+            if (newSolutionCost < bestSolutionCost ||
+                (newSolutionCost == bestSolutionCost && newTotalCost < bestTotalCost)) {
+                bestSolution = currentSolution;
+                bestSolutionCost = newSolutionCost;
+                bestTotalCost = newTotalCost;
+                currentSolutionCost = newSolutionCost;
+            }
+
+            currentTemp *= coolingRate;
+            if (elapsed_time >= 29.90)
+                break;
+        }
+
+        currentSolution = bestSolution;
     }
 
     std::array<Route1, MAX_VEHICLES> getSolution() {
-        return currentSolution1;
+        return currentSolution;
     }
 };
 struct Edge {
@@ -1749,7 +1829,7 @@ class MinWeightMatching {
         return size == 20 ? TWENTY_FT : FORTY_FT;
     }
 
-    void printMatchingStats(const std::vector<std::pair<int, int>> &matches, int remaining_node = -1) {
+    void processAfterMatchingTwentyFt(const std::vector<std::pair<int, int>> &matches, int remaining_node = -1) {
         ll total_weight = 0;
         ll max_weight = -1;
         n_new = 0;
@@ -1823,13 +1903,75 @@ class MinWeightMatching {
                 requests[n_new].id = n_new;
                 Real_idx[n_new] = t.id;
             }
-        // for(int i = 1; i <= n_new; i++)
-        //    cout << requests[i].id << " " << requests[i].size << " " << Real_idx[requests[i].id] << " " << Matched[Real_idx[requests[i].id]] << endl;
-        // for (int i = 1; i <= n_new; i++)
-        //     cout << i << " " << requests[i].id << " " << Real_idx[requests[i].id] << " " << Matched[Real_idx[requests[i].id]] << " " << requests[i].pickup_point << " " << actions[requests[i].pickup_action] << " " << requests[i].drop_point << " " << actions[requests[i].drop_action] << endl;
-        // cout << endl;
-        // std::cout << "Total weight: " << total_weight << "\n";
-        // std::cout << "Maximum edge weight: " << max_weight << "\n";
+    }
+
+    void processAfterMatchingAll(const std::vector<std::pair<int, int>> &matches, int remaining_node = -1) {
+        ll total_weight = 0;
+        ll max_weight = -1;
+        n_new = 0;
+        // std::cout << "Matches:\n";
+        for (const auto &match : matches) {
+            int u = match.first;
+            int v = match.second;
+            ll weight = graph[u][v];
+
+            total_weight += weight;
+            max_weight = std::max(max_weight, weight);
+
+            int pickup_point, drop_point;
+            Action pickup_action, drop_action;
+            if (combinationType[u][v] == 0b0011 || combinationType[u][v] == 0b1100) {
+                requests[++n_new] = requests_origin[u + 1];
+                requests[n_new].id = n_new; // Thêm dòng này
+                Real_idx[n_new] = requests_origin[u + 1].id;
+
+                requests[++n_new] = requests_origin[v + 1];
+                requests[n_new].id = n_new; // Thêm dòng này
+                Real_idx[n_new] = requests_origin[v + 1].id;
+                continue;
+            }
+            Matched[requests_origin[u + 1].id] = requests_origin[v + 1].id;
+            Matched[requests_origin[v + 1].id] = requests_origin[u + 1].id;
+            if (combinationType[u][v] == 0b0101) {
+                pickup_point = requests_origin[u + 1].pickup_point;
+                pickup_action = requests_origin[u + 1].pickup_action;
+                drop_point = requests_origin[v + 1].drop_point;
+                drop_action = requests_origin[v + 1].drop_action;
+            } else if (combinationType[u][v] == 0b1010) {
+                pickup_point = requests_origin[v + 1].pickup_point;
+                pickup_action = requests_origin[v + 1].pickup_action;
+                drop_point = requests_origin[u + 1].drop_point;
+                drop_action = requests_origin[u + 1].drop_action;
+            } else if (combinationType[u][v] == 0b0110) {
+                pickup_point = requests_origin[u + 1].pickup_point;
+                pickup_action = requests_origin[u + 1].pickup_action;
+                drop_point = requests_origin[u + 1].drop_point;
+                drop_action = requests_origin[u + 1].drop_action;
+            } else {
+                pickup_point = requests_origin[v + 1].pickup_point;
+                pickup_action = requests_origin[v + 1].pickup_action;
+                drop_point = requests_origin[v + 1].drop_point;
+                drop_action = requests_origin[v + 1].drop_action;
+            }
+            Request request = {
+                ++n_new,
+                getContainerSize(40),
+                pickup_point,
+                pickup_action,
+                graphWeight[u][v] - distances[pickup_point][drop_point],
+                drop_point,
+                drop_action,
+                0};
+            requests[n_new] = request;
+            Real_idx[n_new] = requests_origin[u + 1].id;
+        }
+        if (remaining_node != -1) {
+            requests[++n_new] = requests_origin[remaining_node + 1];
+            requests[n_new].id = n_new;
+            Real_idx[n_new] = requests_origin[remaining_node + 1].id;
+
+            // std::cout << "Remaining unmatched node: " << remaining_node << "\n";
+        }
     }
 };
 
@@ -1905,7 +2047,7 @@ struct IO {
         }
     }
 
-    void output_route1(const Route1 &route) {
+    void output_route_subtask_12(const Route1 &route) {
         for (const auto &stop : route.stops) {
             std::cout << stop.point << " " << actions[stop.action];
             if (stop.action == PICKUP_CONTAINER || stop.action == PICKUP_CONTAINER_TRAILER ||
@@ -2020,9 +2162,9 @@ struct IO {
         std::cout << "#" << std::endl;
     }
 
-    void output() {
-        PDPSolver solver(requestIdx, num_vehicles, alpha, trailer_point,
-                         trailer_pickup_time, max_iterations, verbose);
+    void subtask_3() {
+        PDPSolver_subtask_3 solver(requestIdx, num_vehicles, alpha, trailer_point,
+                                   trailer_pickup_time, max_iterations, verbose);
 
         solver.solve();
         // freopen("tc/6/out.txt", "w", stdout);
@@ -2033,32 +2175,38 @@ struct IO {
             std::cout << "TRUCK " << i + 1 << std::endl;
             output_route(solution[i]);
         }
-        // for (size_t i = 0; i < num_vehicles; i++)
-        // {
-        //     std::cout << "TRUCK " << i + 1 << std::endl;
-        //     output_route1(solution[i]);
-        // }
     }
 
-    void output1() {
-        PDPSolver1 solver(requests_origin, num_vehicles, alpha, trailer_point,
-                          trailer_pickup_time, max_iterations, verbose);
+    void subtask_2() {
+        PDPSolver_subtask_12 solver(requests_origin, num_vehicles, alpha, trailer_point,
+                                    trailer_pickup_time, max_iterations, verbose);
 
-        solver.solve();
+        solver.solve_subtask_2();
         // freopen("/media/nhdandz/Data/Hackathon/TIKI/tc/5/out.txt", "w", stdout);
 
         std::array<Route1, MAX_VEHICLES> solution = solver.getSolution();
         std::cout << "ROUTES " << num_vehicles << std::endl;
         for (size_t i = 0; i < num_vehicles; i++) {
             std::cout << "TRUCK " << i + 1 << std::endl;
-            output_route1(solution[i]);
+            output_route_subtask_12(solution[i]);
         }
-        // for (size_t i = 0; i < num_vehicles; i++)
-        // {
-        //     std::cout << "TRUCK " << i + 1 << std::endl;
-        //     output_route1(solution[i]);
-        // }
     }
+
+    void subtask_1() {
+        PDPSolver_subtask_12 solver(requests_origin, num_vehicles, alpha, trailer_point,
+                                    trailer_pickup_time, max_iterations, verbose);
+
+        solver.solve_subtask_1();
+        // freopen("tc/1/out.txt", "w", stdout);
+
+        std::array<Route1, MAX_VEHICLES> solution = solver.getSolution();
+        std::cout << "ROUTES " << num_vehicles << std::endl;
+        for (size_t i = 0; i < num_vehicles; i++) {
+            std::cout << "TRUCK " << i + 1 << std::endl;
+            output_route_subtask_12(solution[i]);
+        }
+    }
+
     ll getDistance(int from, int to) {
         return distances[from][to];
     }
@@ -2075,7 +2223,7 @@ struct IO {
         return req.pickup_duration + req.drop_duration + getDistance(req.pickup_point, req.drop_point);
     }
 
-    std::pair<ll, int> calculateTwentyFtCombinationCost(const Request &req1, const Request &req2) {
+    std::pair<ll, int> calculateCombinationCost(const Request &req1, const Request &req2) {
         // Pre-calculate common values to avoid duplication
         ll req1_self_cost = req1.pickup_duration + req1.drop_duration;
         ll req2_self_cost = req2.pickup_duration + req2.drop_duration;
@@ -2108,45 +2256,46 @@ struct IO {
                                     dist_p1_d1,
                                 0b1100});
 
-        // Nested combinations (only if conditions met)
-        bool can_nest_1 = (req2.pickup_action == PICKUP_CONTAINER);
-        bool can_nest_2 = (req1.pickup_action == PICKUP_CONTAINER);
+        if (req1.size == TWENTY_FT && req2.size == TWENTY_FT) { // Nested combinations (only if conditions met)
+            bool can_nest_1 = (req2.pickup_action == PICKUP_CONTAINER);
+            bool can_nest_2 = (req1.pickup_action == PICKUP_CONTAINER);
 
-        if (can_nest_1) {
-            // 3. p1->p2->d1->d2 (pattern: 0101)
-            if (req1.drop_action == DROP_CONTAINER) {
-                combinations.push_back({total_durations +
-                                            dist_p1_p2 +
-                                            dist_p2_d1 +
-                                            dist_d1_d2,
-                                        0b0101});
+            if (can_nest_1) {
+                // 3. p1->p2->d1->d2 (pattern: 0101)
+                if (req1.drop_action == DROP_CONTAINER) {
+                    combinations.push_back({total_durations +
+                                                dist_p1_p2 +
+                                                dist_p2_d1 +
+                                                dist_d1_d2,
+                                            0b0101});
+                }
+                // 4. p1->p2->d2->d1 (pattern: 0110)
+                if (req2.drop_action == DROP_CONTAINER) {
+                    combinations.push_back({total_durations +
+                                                dist_p1_p2 +
+                                                dist_p2_d2 +
+                                                dist_d2_d1,
+                                            0b0110});
+                }
             }
-            // 4. p1->p2->d2->d1 (pattern: 0110)
-            if (req2.drop_action == DROP_CONTAINER) {
-                combinations.push_back({total_durations +
-                                            dist_p1_p2 +
-                                            dist_p2_d2 +
-                                            dist_d2_d1,
-                                        0b0110});
-            }
-        }
 
-        if (can_nest_2) {
-            // 5. p2->p1->d1->d2 (pattern: 1001)
-            if (req1.drop_action == DROP_CONTAINER) {
-                combinations.push_back({total_durations +
-                                            dist_p2_p1 +
-                                            dist_p1_d1 +
-                                            dist_d1_d2,
-                                        0b1001});
-            }
-            // 6. p2->p1->d2->d1 (pattern: 1010)
-            if (req2.drop_action == DROP_CONTAINER) {
-                combinations.push_back({total_durations +
-                                            dist_p2_p1 +
-                                            dist_p1_d2 +
-                                            dist_d2_d1,
-                                        0b1010});
+            if (can_nest_2) {
+                // 5. p2->p1->d1->d2 (pattern: 1001)
+                if (req1.drop_action == DROP_CONTAINER) {
+                    combinations.push_back({total_durations +
+                                                dist_p2_p1 +
+                                                dist_p1_d1 +
+                                                dist_d1_d2,
+                                            0b1001});
+                }
+                // 6. p2->p1->d2->d1 (pattern: 1010)
+                if (req2.drop_action == DROP_CONTAINER) {
+                    combinations.push_back({total_durations +
+                                                dist_p2_p1 +
+                                                dist_p1_d2 +
+                                                dist_d2_d1,
+                                            0b1010});
+                }
             }
         }
 
@@ -2154,7 +2303,7 @@ struct IO {
         return *min_element(combinations.begin(), combinations.end());
     }
 
-    void pairMatching() {
+    void pairMatchingTwentyFt() {
         int num_of_nodes = idx;
         int i = 0;
         for (auto t : requests_20ft) {
@@ -2170,7 +2319,7 @@ struct IO {
         // Build the graph
         for (int i = 0; i < num_of_nodes; i++) {
             for (int j = i + 1; j < num_of_nodes; j++) {
-                auto cost_combination = calculateTwentyFtCombinationCost(requests_20ft[i], requests_20ft[j]);
+                auto cost_combination = calculateCombinationCost(requests_20ft[i], requests_20ft[j]);
                 graphWeight[i][j] = cost_combination.first;
                 graphWeight[j][i] = cost_combination.first;
                 combinationType[i][j] = cost_combination.second;
@@ -2179,7 +2328,35 @@ struct IO {
         }
         MinWeightMatching matcher(graphWeight);
         auto [matches, remaining_node] = matcher.findMinWeightMatching();
-        matcher.printMatchingStats(matches, remaining_node);
+        matcher.processAfterMatchingTwentyFt(matches, remaining_node);
+        for (int i = 1; i <= n_new; i++)
+            requestIdx.push_back(requests[i].id);
+        // Handle the remaining node if needed
+        if (remaining_node != -1) {
+            // Process requests_20ft[remaining_node] separately
+        }
+    }
+
+    void pairMatchingAll() {
+        int num_of_nodes = n_total;
+
+        graphWeight.clear();
+        graphWeight = std::vector<std::vector<ll>>(num_of_nodes, std::vector<ll>(num_of_nodes, 0));
+        combinationType.clear();
+        combinationType = std::vector<std::vector<int>>(num_of_nodes, std::vector<int>(num_of_nodes, 0));
+        // Build the graph
+        for (int i = 0; i < num_of_nodes; i++) {
+            for (int j = i + 1; j < num_of_nodes; j++) {
+                auto cost_combination = calculateCombinationCost(requests_origin[i + 1], requests_origin[j + 1]);
+                graphWeight[i][j] = cost_combination.first;
+                graphWeight[j][i] = cost_combination.first;
+                combinationType[i][j] = cost_combination.second;
+                combinationType[j][i] = cost_combination.second;
+            }
+        }
+        MinWeightMatching matcher(graphWeight);
+        auto [matches, remaining_node] = matcher.findMinWeightMatching();
+        matcher.processAfterMatchingAll(matches, remaining_node);
         for (int i = 1; i <= n_new; i++)
             requestIdx.push_back(requests[i].id);
         // Handle the remaining node if needed
@@ -2199,10 +2376,15 @@ int main() {
     IO io(100000, 100000, 0);
     io.input();
     if (n_total > 100) {
-        io.pairMatching();
-        io.output();
-    } else
-        io.output1();
+        if (n_total / io.num_vehicles > 8)
+            io.pairMatchingAll();
+        else
+            io.pairMatchingTwentyFt();
+        io.subtask_3();
+    } else if (n_total > 20)
+        io.subtask_2();
+    else
+        io.subtask_1();
 
     return 0;
 }
