@@ -1904,75 +1904,6 @@ class MinWeightMatching {
                 Real_idx[n_new] = t.id;
             }
     }
-
-    void processAfterMatchingAll(const std::vector<std::pair<int, int>> &matches, int remaining_node = -1) {
-        ll total_weight = 0;
-        ll max_weight = -1;
-        n_new = 0;
-        // std::cout << "Matches:\n";
-        for (const auto &match : matches) {
-            int u = match.first;
-            int v = match.second;
-            ll weight = graph[u][v];
-
-            total_weight += weight;
-            max_weight = std::max(max_weight, weight);
-
-            int pickup_point, drop_point;
-            Action pickup_action, drop_action;
-            if (combinationType[u][v] == 0b0011 || combinationType[u][v] == 0b1100) {
-                requests[++n_new] = requests_origin[u + 1];
-                requests[n_new].id = n_new; // Thêm dòng này
-                Real_idx[n_new] = requests_origin[u + 1].id;
-
-                requests[++n_new] = requests_origin[v + 1];
-                requests[n_new].id = n_new; // Thêm dòng này
-                Real_idx[n_new] = requests_origin[v + 1].id;
-                continue;
-            }
-            Matched[requests_origin[u + 1].id] = requests_origin[v + 1].id;
-            Matched[requests_origin[v + 1].id] = requests_origin[u + 1].id;
-            if (combinationType[u][v] == 0b0101) {
-                pickup_point = requests_origin[u + 1].pickup_point;
-                pickup_action = requests_origin[u + 1].pickup_action;
-                drop_point = requests_origin[v + 1].drop_point;
-                drop_action = requests_origin[v + 1].drop_action;
-            } else if (combinationType[u][v] == 0b1010) {
-                pickup_point = requests_origin[v + 1].pickup_point;
-                pickup_action = requests_origin[v + 1].pickup_action;
-                drop_point = requests_origin[u + 1].drop_point;
-                drop_action = requests_origin[u + 1].drop_action;
-            } else if (combinationType[u][v] == 0b0110) {
-                pickup_point = requests_origin[u + 1].pickup_point;
-                pickup_action = requests_origin[u + 1].pickup_action;
-                drop_point = requests_origin[u + 1].drop_point;
-                drop_action = requests_origin[u + 1].drop_action;
-            } else {
-                pickup_point = requests_origin[v + 1].pickup_point;
-                pickup_action = requests_origin[v + 1].pickup_action;
-                drop_point = requests_origin[v + 1].drop_point;
-                drop_action = requests_origin[v + 1].drop_action;
-            }
-            Request request = {
-                ++n_new,
-                getContainerSize(40),
-                pickup_point,
-                pickup_action,
-                graphWeight[u][v] - distances[pickup_point][drop_point],
-                drop_point,
-                drop_action,
-                0};
-            requests[n_new] = request;
-            Real_idx[n_new] = requests_origin[u + 1].id;
-        }
-        if (remaining_node != -1) {
-            requests[++n_new] = requests_origin[remaining_node + 1];
-            requests[n_new].id = n_new;
-            Real_idx[n_new] = requests_origin[remaining_node + 1].id;
-
-            // std::cout << "Remaining unmatched node: " << remaining_node << "\n";
-        }
-    }
 };
 
 struct IO {
@@ -2336,34 +2267,6 @@ struct IO {
             // Process requests_20ft[remaining_node] separately
         }
     }
-
-    void pairMatchingAll() {
-        int num_of_nodes = n_total;
-
-        graphWeight.clear();
-        graphWeight = std::vector<std::vector<ll>>(num_of_nodes, std::vector<ll>(num_of_nodes, 0));
-        combinationType.clear();
-        combinationType = std::vector<std::vector<int>>(num_of_nodes, std::vector<int>(num_of_nodes, 0));
-        // Build the graph
-        for (int i = 0; i < num_of_nodes; i++) {
-            for (int j = i + 1; j < num_of_nodes; j++) {
-                auto cost_combination = calculateCombinationCost(requests_origin[i + 1], requests_origin[j + 1]);
-                graphWeight[i][j] = cost_combination.first;
-                graphWeight[j][i] = cost_combination.first;
-                combinationType[i][j] = cost_combination.second;
-                combinationType[j][i] = cost_combination.second;
-            }
-        }
-        MinWeightMatching matcher(graphWeight);
-        auto [matches, remaining_node] = matcher.findMinWeightMatching();
-        matcher.processAfterMatchingAll(matches, remaining_node);
-        for (int i = 1; i <= n_new; i++)
-            requestIdx.push_back(requests[i].id);
-        // Handle the remaining node if needed
-        if (remaining_node != -1) {
-            // Process requests_20ft[remaining_node] separately
-        }
-    }
 };
 
 int main() {
@@ -2376,10 +2279,7 @@ int main() {
     IO io(100000, 100000, 0);
     io.input();
     if (n_total > 100) {
-        if (n_total / io.num_vehicles > 8)
-            io.pairMatchingAll();
-        else
-            io.pairMatchingTwentyFt();
+        io.pairMatchingTwentyFt();
         io.subtask_3();
     } else if (n_total > 20)
         io.subtask_2();
