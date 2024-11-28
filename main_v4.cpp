@@ -346,62 +346,12 @@ class PDPSolver_subtask_3 {
         return route.complete_cost + costDelta;
     }
 
-    ll calculateRemovalCost(Route &route, std::list<int>::iterator it) {
-        if (it == route.list_reqs.end())
-            return route.complete_cost; // Request not found
-
-        auto request_id = *it;
-        const Request &req = requests[request_id];
-        ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
-
-        if (route.list_reqs.size() == 1) {
-            // If this is the only request
-            costDelta -= calculateDepotToRequestCost(route.depot, req);
-            costDelta -= calculateRequestToDepotCost(req, route.depot);
-            return 0; // Route will be empty
-        }
-
-        if (it == route.list_reqs.begin()) {
-            // If removing first request
-            const Request &next_req = requests[*std::next(it)];
-            costDelta -= calculateDepotToRequestCost(route.depot, req);
-            costDelta -= calculateRequestTransitionCost(req, next_req);
-            costDelta += calculateDepotToRequestCost(route.depot, next_req);
-        } else if (std::next(it) == route.list_reqs.end()) {
-            // If removing last request
-            const Request &prev_req = requests[*std::prev(it)];
-            costDelta -= calculateRequestTransitionCost(prev_req, req);
-            costDelta -= calculateRequestToDepotCost(req, route.depot);
-            costDelta += calculateRequestToDepotCost(prev_req, route.depot);
-        } else {
-            // If removing from middle
-            const Request &prev_req = requests[*std::prev(it)];
-            const Request &next_req = requests[*std::next(it)];
-            costDelta -= calculateRequestTransitionCost(prev_req, req);
-            costDelta -= calculateRequestTransitionCost(req, next_req);
-            costDelta += calculateRequestTransitionCost(prev_req, next_req);
-        }
-
-        return route.complete_cost + costDelta;
-    }
-
     void removeStopsByRequestId(Route &route, int request_id) {
         // Calculate new cost before modifying the list
         ll newCost = calculateRemovalCost(route, request_id);
 
         // Remove the request
         route.list_reqs.remove(request_id);
-
-        // Update route cost
-        route.complete_cost = newCost;
-    }
-
-    void removeStopsByRequestIt(Route &route, std::list<int>::iterator it) {
-        // Calculate new cost before modifying the list
-        ll newCost = calculateRemovalCost(route, it);
-
-        // Remove the request
-        route.list_reqs.erase(it);
 
         // Update route cost
         route.complete_cost = newCost;
