@@ -1,744 +1,802 @@
 #include <bits/stdc++.h>
 
-typedef long long ll;
-
-// Forward declarations
+// Forward declaration
 class Blossom;
 using BlossomPtr = std::shared_ptr<Blossom>;
 using Node = int;
-using Weight = ll;
-using Edge = std::pair<Node, Node>;
 
-// Custom hasher for Edge
-struct EdgeHash {
-    std::size_t operator()(const Edge &edge) const {
-        return std::hash<Node>()(edge.first) ^ (std::hash<Node>()(edge.second) << 1);
-    }
-};
+// Define NoNode as constant -1
+const Node NoNode = -1;
 
-// Result structure for matching
-struct MatchingResult {
-    std::vector<Edge> matches;
-    std::optional<Node> remaining_node;
-};
-
-// Utility class for blossom representation
 class Blossom {
   public:
-    std::vector<std::variant<Node, BlossomPtr>> childs;
-    std::vector<Edge> edges;
-    std::optional<std::vector<Edge>> mybestedges;
+    std::vector<Node> nodeChilds;
+    std::vector<BlossomPtr> blossomChilds;
+    std::vector<std::pair<Node, Node>> edges; // pairs of vertices representing edges
+    std::vector<std::pair<Node, Node>> myBestEdges;
 
     // Get all leaf vertices in the blossom
-    std::vector<Node> leaves() const {
-        std::vector<Node> leaf_vertices;
-        std::vector<std::variant<Node, BlossomPtr>> stack = childs;
+    std::vector<Node> leaves() {
+        std::vector<Node> leafVertices;
+        std::stack<BlossomPtr> stack;
 
+        // First add direct node children
+        leafVertices.insert(leafVertices.end(), nodeChilds.begin(), nodeChilds.end());
+
+        // Add all blossom children to stack
+        for (const auto &blossom : blossomChilds) {
+            stack.push(blossom);
+        }
+
+        // Process blossoms
         while (!stack.empty()) {
-            auto current = stack.back();
-            stack.pop_back();
+            auto current = stack.top();
+            stack.pop();
 
-            if (auto *blossom_ptr = std::get_if<BlossomPtr>(&current)) {
-                const auto &child_blossom = *blossom_ptr;
-                stack.insert(stack.end(),
-                             child_blossom->childs.begin(),
-                             child_blossom->childs.end());
-            } else if (auto *node_ptr = std::get_if<Node>(&current)) {
-                leaf_vertices.push_back(*node_ptr);
+            // Add direct nodes from this blossom
+            leafVertices.insert(leafVertices.end(),
+                                current->nodeChilds.begin(),
+                                current->nodeChilds.end());
+
+            // Add sub-blossoms to stack
+            for (const auto &subBlossom : current->blossomChilds) {
+                stack.push(subBlossom);
             }
         }
-        return leaf_vertices;
+
+        return leafVertices;
     }
 };
 
-class GraphMatching {
-  private:
-    // Graph representation
-    std::vector<std::vector<Weight>> graph;
-    Weight max_weight = 0;
-    size_t num_nodes;
-    bool max_cardinality = true;
+// A type that can be either a Node or a BlossomPtr
+using NodeOrBlossom = std::variant<Node, BlossomPtr>;
 
-    // Matching state
-    std::unordered_map<Node, Node> mate;
-    std::unordered_map<std::variant<Node, BlossomPtr>, int> label;
-    std::unordered_map<std::variant<Node, BlossomPtr>, std::optional<Edge>> labeledge;
-    std::unordered_map<Node, std::variant<Node, BlossomPtr>> inblossom;
-    std::unordered_map<std::variant<Node, BlossomPtr>,
-                       std::optional<std::variant<Node, BlossomPtr>>>
-        blossomparent;
-    std::unordered_map<std::variant<Node, BlossomPtr>, Node> blossombase;
-    std::unordered_map<std::variant<Node, BlossomPtr>,
-                       std::optional<Edge>>
-        bestedge;
-    std::unordered_map<std::variant<Node, BlossomPtr>, Weight> dualvar;
-    std::unordered_map<BlossomPtr, Weight> blossomdual;
-    std::unordered_map<Edge, bool, EdgeHash> allowedge;
+class MaxWeightMatching {
+  private:
+    // Graph data
+    std::vector<std::vector<int>> graph_matrix;
+    std::vector<Node> gnodes;
+    int num_nodes;
+    bool maxcardinality;
+    int maxweight;
+    bool allinteger;
+
+    // Core matching state
+    std::map<Node, Node> mate;
+    std::map<NodeOrBlossom, int> label; // Changed from Node to NodeOrBlossom
+    std::map<NodeOrBlossom, std::pair<Node, Node>> labeledge;
+
+    // Blossom management
+    std::map<Node, NodeOrBlossom> inblossom; // Changed return type to NodeOrBlossom
+    std::map<NodeOrBlossom, Node> blossombase;
+    std::map<BlossomPtr, BlossomPtr> blossomparent;
+    std::map<BlossomPtr, int> blossomdual;
+
+    // Edge management
+    std::map<NodeOrBlossom, std::pair<Node, Node>> bestedge;
+    std::map<std::pair<Node, Node>, bool> allowedge;
     std::vector<Node> queue;
 
-    // Utility methods
-    Weight slack(Node v, Node w) const {
-        // Return 2 * slack of edge (v,w)
-        return dualvar.at(v) + dualvar.at(w) - 2 * graph[v][w];
+    // Dual variables
+    std::map<NodeOrBlossom, int> dualvar;
+
+    // Helper function to create NodeOrBlossom from Node
+    NodeOrBlossom makeNodeOrBlossom(Node n) {
+        return NodeOrBlossom(n);
     }
 
-    void assign_label(Node w, int t, std::optional<Node> v) {
-        auto b = inblossom.at(w);
-        assert(!label.count(w) && !label.count(b));
+    // Helper function to create NodeOrBlossom from BlossomPtr
+    NodeOrBlossom makeNodeOrBlossom(BlossomPtr b) {
+        return NodeOrBlossom(b);
+    }
 
-        label[w] = label[b] = t;
-        if (v) {
-            labeledge[w] = labeledge[b] = Edge(*v, w);
-        } else {
-            labeledge[w] = labeledge[b] = std::nullopt;
+  public:
+    MaxWeightMatching(const std::vector<std::vector<int>> &matrix, bool max_cardinality = false)
+        : graph_matrix(matrix), maxcardinality(max_cardinality) {
+
+        num_nodes = matrix.size();
+        if (num_nodes == 0)
+            return;
+
+        gnodes.resize(num_nodes);
+        for (int i = 0; i < num_nodes; i++) {
+            gnodes[i] = i;
         }
 
-        bestedge[w] = bestedge[b] = std::nullopt;
+        maxweight = 0;
+        allinteger = true;
+        for (int i = 0; i < num_nodes; i++) {
+            for (int j = i + 1; j < num_nodes; j++) {
+                int wt = matrix[i][j];
+                if (wt > maxweight) {
+                    maxweight = wt;
+                }
+                allinteger = allinteger && (wt == static_cast<int>(wt));
+            }
+        }
+
+        // Initialize mappings
+        for (Node n : gnodes) {
+            inblossom[n] = makeNodeOrBlossom(n);
+            blossombase[makeNodeOrBlossom(n)] = n;
+            dualvar[makeNodeOrBlossom(n)] = maxweight;
+        }
+    }
+
+  private:
+    // Helper method to get slack of an edge
+    int slack(Node i, Node j) const {
+        auto varI = dualvar.at(inblossom.at(i));
+        auto varJ = dualvar.at(inblossom.at(j));
+        return varI + varJ - 2 * graph_matrix[i][j];
+    }
+
+    void assignLabel(Node w, int t, Node v) {
+        auto b = inblossom[w];
+        assert(label.find(b) == label.end());
+        label[b] = t;
+
+        if (v != NoNode) {
+            labeledge[b] = std::make_pair(v, w);
+        } else {
+            labeledge[b] = std::make_pair(NoNode, NoNode);
+        }
+
+        bestedge[b] = std::make_pair(NoNode, NoNode);
 
         if (t == 1) {
-            // b is a top-level S-vertex/blossom; enqueue its sub-vertices
-            if (auto *blossom_ptr = std::get_if<BlossomPtr>(&b)) {
-                auto leaves = (*blossom_ptr)->leaves();
+            // Check if b is a BlossomPtr
+            if (auto *blossom = std::get_if<BlossomPtr>(&b)) {
+                auto leaves = (*blossom)->leaves();
                 queue.insert(queue.end(), leaves.begin(), leaves.end());
             } else {
                 queue.push_back(std::get<Node>(b));
             }
         } else if (t == 2) {
-            // b is a top-level T-vertex/blossom; assign label S to its mate
-            // (if b is a non-trivial blossom, its base is the only vertex with a mate)
-            auto base = blossombase.at(b);
-            assert(mate.count(base));
-            assign_label(mate[base], 1, base);
+            Node base = blossombase[b];
+            assert(mate.find(base) != mate.end());
+            assignLabel(mate[base], 1, base);
         }
     }
 
-    std::optional<Node> scan_blossom(Node v, Node w) {
-        // Find a new blossom or augmenting path starting at vertices v and w.
-        // Returns the base vertex of the new blossom or nullopt if an augmenting path was found.
+    Node scanBlossom(Node v, Node w) {
+        std::vector<NodeOrBlossom> path;
+        Node base = NoNode;
 
-        std::vector<std::variant<Node, BlossomPtr>> path;
-        std::optional<Node> base;
+        while (v != NoNode) {
+            auto b = inblossom[v];
 
-        // Helper lambda to mark all vertices in path as T-vertices
-        auto label_path = [this](const std::vector<std::variant<Node, BlossomPtr>> &path) {
-            for (const auto &b : path) {
-                label[b] = 1;
-            }
-        };
-
-        // Loop variables
-        std::optional<Node> current_v = v;
-        std::optional<Node> current_w = w;
-
-        // Keep going until we find a common ancestor or augmenting path
-        while (current_v.has_value()) {
-            auto bv = inblossom.at(current_v.value());
-            if (label[bv] & 4) { // Vertex is already marked - found ancestor
-                base = blossombase.at(bv);
+            if (label[b] & 4) {
+                base = blossombase[b];
                 break;
             }
 
-            assert(label[bv] == 1); // Must be an S-vertex
-            path.push_back(bv);     // Add to path
-            label[bv] = 5;          // Mark as scanned
+            assert(label[b] == 1);
+            path.push_back(b);
 
-            // Check if we've hit an unmatched vertex - augmenting path found
-            if (!labeledge[bv].has_value()) {
-                assert(!mate.count(blossombase.at(bv)));
-                // Reset v to terminate the loop but leave w to explore the other side
-                current_v = std::nullopt;
+            label[b] = 5;
+
+            if (labeledge[b].first == NoNode) {
+                // assert(blossombase[b] != mate.find(blossombase[b]) != mate.end());
+                v = NoNode;
             } else {
-                // Get the next vertex to explore
-                auto edge = labeledge[bv].value();
-                assert(mate[blossombase.at(bv)] == edge.first);
+                assert(labeledge[b].first == mate[blossombase[b]]);
+                v = labeledge[b].first;
 
-                // Move to the matched vertex
-                current_v = edge.first;
-                auto b = inblossom.at(current_v.value());
-                assert(label[b] == 2); // Must be a T-vertex
-
-                // And then to its neighbor
-                auto next_edge = labeledge[b].value();
-                current_v = next_edge.first;
+                b = inblossom[v];
+                assert(label[b] == 2);
+                v = labeledge[b].first;
             }
 
-            // Swap v and w so we explore both paths alternately
-            if (current_w.has_value()) {
-                std::swap(current_v, current_w);
+            if (w != NoNode) {
+                std::swap(v, w);
             }
         }
 
-        // Reset labels back to S-vertices
-        label_path(path);
+        for (const auto &b : path) {
+            label[b] = 1;
+        }
+
         return base;
     }
 
-    void add_blossom(Node base, Node v, Node w) {
-        // Create a new blossom with the given base vertex, edge (v,w), and path
+    void addBlossom(Node base, Node v, Node w) {
         auto bb = inblossom[base];
         auto bv = inblossom[v];
         auto bw = inblossom[w];
 
-        // Create the new blossom
+        // Create new blossom
         auto b = std::make_shared<Blossom>();
-        blossombase[b] = base;
-        blossomparent[b] = std::nullopt;
+        blossombase[makeNodeOrBlossom(b)] = base;
+        blossomparent[b] = nullptr;
 
-        // Make list of blossom's sub-vertices and edges, and their connections
-        std::vector<std::variant<Node, BlossomPtr>> path;
-        std::vector<Edge> edges;
-
-        // Trace back from v to base
-        auto current = v;
-        while (inblossom[current] != bb) {
-            // Add bv to the new blossom
-            path.push_back(bv);
-            edges.push_back(labeledge[bv].value());
-            assert(label[bv] == 2 ||
-                   (label[bv] == 1 &&
-                    labeledge[bv].value().first == mate[blossombase[bv]]));
-
-            // Trace one step back
-            current = labeledge[bv].value().first;
-            bv = inblossom[current];
+        // Set bb's parent to b only if it's a blossom
+        if (auto *blossom = std::get_if<BlossomPtr>(&bb)) {
+            blossomparent[*blossom] = b;
         }
 
-        // Add base to the new blossom
+        // Initialize b's children with proper path tracking
+        std::vector<NodeOrBlossom> path;
+        b->edges.push_back(std::make_pair(v, w));
+
+        // Trace back from v to base, collecting path
+        while (bv != bb) {
+            if (auto *blossom = std::get_if<BlossomPtr>(&bv)) {
+                blossomparent[*blossom] = b;
+            }
+            path.push_back(bv);
+            b->edges.push_back(labeledge[bv]);
+            v = labeledge[bv].first;
+            bv = inblossom[v];
+        }
         path.push_back(bb);
 
-        // Trace forward from w to base
-        current = w;
-        while (inblossom[current] != bb) {
-            // Add bw to the new blossom
-            path.push_back(bw);
-            edges.push_back(Edge(labeledge[bw].value().second,
-                                 labeledge[bw].value().first));
-            assert(label[bw] == 2 ||
-                   (label[bw] == 1 &&
-                    labeledge[bw].value().first == mate[blossombase[bw]]));
+        // Reverse paths appropriately
+        std::reverse(path.begin(), path.end());
+        std::reverse(b->edges.begin(), b->edges.end());
 
-            // Trace one step forward
-            current = labeledge[bw].value().first;
-            bw = inblossom[current];
+        // Trace from w to base
+        while (bw != bb) {
+            if (auto *blossom = std::get_if<BlossomPtr>(&bw)) {
+                blossomparent[*blossom] = b;
+            }
+            path.push_back(bw);
+            b->edges.push_back(std::make_pair(labeledge[bw].second, labeledge[bw].first));
+            w = labeledge[bw].first;
+            bw = inblossom[w];
         }
 
-        // Reverse lists to put them in the correct order
-        std::reverse(path.begin(), path.end());
-        std::reverse(edges.begin(), edges.end());
-
-        // Set blossom's children and edges
-        b->childs = std::move(path);
-        b->edges = std::move(edges);
-
-        // Set vertices' new blossom parent
-        for (const auto &child : b->childs) {
-            if (auto *blossom_ptr = std::get_if<BlossomPtr>(&child)) {
-                blossomparent[*blossom_ptr] = b;
+        // Properly organize nodes and blossoms in the new blossom
+        for (const auto &p : path) {
+            if (auto *node = std::get_if<Node>(&p)) {
+                b->nodeChilds.push_back(*node);
+            } else if (auto *blossom = std::get_if<BlossomPtr>(&p)) {
+                b->blossomChilds.push_back(*blossom);
             }
         }
 
-        // Make sure the blossom's base is the first vertex in its child list
-        assert(std::holds_alternative<Node>(b->childs[0]) &&
-               std::get<Node>(b->childs[0]) == base);
-
-        // Compute blossom's label:
-        label[b] = 1; // S-vertex
-        // Add the new blossom to the label dicts
-        labeledge[b] = labeledge[bb];
-        // Set the new blossom's dual variable to zero
+        // Update blossom properties
+        label[makeNodeOrBlossom(b)] = 1;
+        labeledge[makeNodeOrBlossom(b)] = labeledge[bb];
         blossomdual[b] = 0;
 
-        // Relabel vertices and find the best edge for the new blossom
-        std::unordered_map<std::variant<Node, BlossomPtr>, Edge> best_edge_to;
+        // Update all vertex mappings to point to new blossom
+        for (Node v : b->leaves()) {
+            inblossom[v] = makeNodeOrBlossom(b);
+        }
 
-        for (const auto &child : b->childs) {
-            // Update inblossom for all vertices in the blossom
-            if (auto *blossom_ptr = std::get_if<BlossomPtr>(&child)) {
-                for (Node v : (*blossom_ptr)->leaves()) {
-                    inblossom[v] = b;
-                }
-                // Compute the best edge for the sub-blossom
-                if ((*blossom_ptr)->mybestedges.has_value()) {
-                    for (const auto &edge : (*blossom_ptr)->mybestedges.value()) {
-                        update_best_edge(edge, *blossom_ptr, best_edge_to);
-                    }
-                    (*blossom_ptr)->mybestedges = std::nullopt; // Clear cached best edges
+        // Handle remaining edge updates as before
+        // ... (rest of addBlossom implementation)
+        // Handle best edges
+        std::map<NodeOrBlossom, std::pair<Node, Node>> bestedgeto;
+
+        for (const auto &bv : path) {
+            std::vector<std::pair<Node, Node>> nblist;
+
+            // Get neighbor list based on whether bv is a blossom or node
+            if (auto *blossom = std::get_if<BlossomPtr>(&bv)) {
+                if (!(*blossom)->myBestEdges.empty()) {
+                    nblist = (*blossom)->myBestEdges;
+                    (*blossom)->myBestEdges.clear();
                 } else {
-                    // Compute best edges for all vertices in the sub-blossom
-                    for (Node v : (*blossom_ptr)->leaves()) {
-                        for (Node u = 0; u < num_nodes; ++u) {
-                            if (v != u) {
-                                update_best_edge(Edge(v, u), *blossom_ptr, best_edge_to);
+                    // Generate all possible edges from leaves
+                    auto leaves = (*blossom)->leaves();
+                    for (Node v : leaves) {
+                        for (int w = 0; w < num_nodes; w++) {
+                            if (v != w) {
+                                nblist.push_back(std::make_pair(v, w));
                             }
                         }
                     }
                 }
-                // Clear blossom's best edge cache
-                bestedge[*blossom_ptr] = std::nullopt;
             } else {
-                Node v = std::get<Node>(child);
-                inblossom[v] = b;
-                // Compute best edges for the vertex
-                for (Node u = 0; u < num_nodes; ++u) {
-                    if (v != u) {
-                        update_best_edge(Edge(v, u), v, best_edge_to);
+                Node node = std::get<Node>(bv);
+                for (int w = 0; w < num_nodes; w++) {
+                    if (node != w) {
+                        nblist.push_back(std::make_pair(node, w));
                     }
                 }
-                bestedge[v] = std::nullopt;
+            }
+
+            // Check all edges in nblist
+            for (const auto &k : nblist) {
+                Node i = k.first, j = k.second;
+                auto bj = inblossom[j];
+
+                // j is in b?
+                if (bj == makeNodeOrBlossom(b)) {
+                    std::swap(i, j);
+                    bj = inblossom[j];
+                }
+
+                if (bj != makeNodeOrBlossom(b) &&
+                    label[bj] == 1 &&
+                    (bestedgeto.find(bj) == bestedgeto.end() ||
+                     slack(i, j) < slack(bestedgeto[bj].first, bestedgeto[bj].second))) {
+                    bestedgeto[bj] = std::make_pair(i, j);
+                }
+            }
+            bestedge[bv] = std::make_pair(NoNode, NoNode);
+        }
+
+        // Store best edges in blossom
+        b->myBestEdges.clear();
+        for (const auto &[_, edge] : bestedgeto) {
+            b->myBestEdges.push_back(edge);
+        }
+
+        // Find the best edge for the blossom
+        std::pair<Node, Node> mybestedge = std::make_pair(NoNode, NoNode);
+        int mybestslack = std::numeric_limits<int>::max();
+
+        for (const auto &k : b->myBestEdges) {
+            int kslack = slack(k.first, k.second);
+            if (mybestedge.first == NoNode || kslack < mybestslack) {
+                mybestedge = k;
+                mybestslack = kslack;
             }
         }
-
-        // Save the best edges for the blossom
-        b->mybestedges = std::vector<Edge>();
-        for (const auto &[_, edge] : best_edge_to) {
-            b->mybestedges.value().push_back(edge);
-        }
-
-        // Select the edge with minimum slack as the blossom's best edge
-        std::optional<Edge> best_edge;
-        Weight best_slack = std::numeric_limits<Weight>::infinity();
-
-        for (const auto &edge : b->mybestedges.value()) {
-            Weight current_slack = slack(edge.first, edge.second);
-            if (!best_edge || current_slack < best_slack) {
-                best_edge = edge;
-                best_slack = current_slack;
-            }
-        }
-
-        bestedge[b] = best_edge;
+        bestedge[makeNodeOrBlossom(b)] = mybestedge;
     }
 
-    void update_best_edge(Edge edge, const std::variant<Node, BlossomPtr> &bv,
-                          std::unordered_map<std::variant<Node, BlossomPtr>, Edge> &best_edge_to) {
-        Node i = edge.first;
-        Node j = edge.second;
-
-        if (inblossom[j] != inblossom[i]) {
-            auto bj = inblossom[j];
-            if (label.count(bj) && label[bj] == 1) {
-                // j's blossom is also S-vertex; save edge with minimum slack
-                if (!best_edge_to.count(bj) ||
-                    slack(i, j) < slack(best_edge_to[bj].first, best_edge_to[bj].second)) {
-                    best_edge_to[bj] = edge;
-                }
-            }
-        }
-    }
-
-    void augment_blossom(const BlossomPtr &b, Node v) {
-        std::function<void(const BlossomPtr &, Node)> _recurse;
-        _recurse = [&](const BlossomPtr &b, Node v) {
-            Node t = v;
-            auto &childs = b->childs;
-            auto &edges = b->edges;
-
-            // Find position of v in blossom's child list
-            size_t i = 0;
-            for (; i < childs.size(); ++i) {
-                if (std::holds_alternative<Node>(childs[i])) {
-                    if (std::get<Node>(childs[i]) == v)
-                        break;
-                } else {
-                    auto bv = std::get<BlossomPtr>(childs[i]);
-                    auto leaves = bv->leaves();
-                    if (std::find(leaves.begin(), leaves.end(), v) != leaves.end())
-                        break;
-                }
-            }
-            assert(i < childs.size());
-
-            // Determine direction and step size
-            size_t j = i;
-            int jstep;
-            if (i & 1) {
-                j -= childs.size();
-                jstep = 1;
-            } else {
-                jstep = -1;
-            }
-
-            // Match alternating edges along the blossom
-            while (j != 0) {
-                j += jstep;
-                Node w = jstep == 1 ? edges[j].first : edges[j - 1].second;
-                Node x = jstep == 1 ? edges[j].second : edges[j - 1].first;
-
-                if (std::holds_alternative<BlossomPtr>(childs[j])) {
-                    _recurse(std::get<BlossomPtr>(childs[j]), w);
-                }
-
-                j += jstep;
-                if (std::holds_alternative<BlossomPtr>(childs[j])) {
-                    _recurse(std::get<BlossomPtr>(childs[j]), x);
-                }
-
-                // Match the edge between sub-blossoms
-                mate[w] = x;
-                mate[x] = w;
-            }
-
-            // Rotate blossom if necessary
-            if (i > 0) {
-                std::rotate(childs.begin(), childs.begin() + i, childs.end());
-                std::rotate(edges.begin(), edges.begin() + i, edges.end());
-                blossombase[b] = v;
-            }
-        };
-
-        _recurse(b, v);
-    }
-
-    void augment_matching(Node v, Node w) {
+    void augmentMatching(Node v, Node w) {
+        // For each s,j in ((v,w), (w,v)):
         for (auto [s, j] : std::vector<std::pair<Node, Node>>{{v, w}, {w, v}}) {
             while (true) {
                 auto bs = inblossom[s];
-                assert(label[bs] == 1);
-                assert(!labeledge[bs].has_value() ||
-                       labeledge[bs].value().first == mate[blossombase[bs]]);
+                // assert(label[bs] == 1);
+                // assert(
+                //     labeledge[bs].first == NoNode && blossombase[bs] != mate.find(blossombase[bs]) != mate.end() ||
+                //     labeledge[bs].first == mate[blossombase[bs]]);
 
-                if (std::holds_alternative<BlossomPtr>(bs)) {
-                    augment_blossom(std::get<BlossomPtr>(bs), s);
+                // If bs is a top-level blossom, stop
+                if (auto *blossom = std::get_if<BlossomPtr>(&bs)) {
+                    augmentBlossom(*blossom, s);
                 }
 
-                // Match the vertices
+                // Update mate[s]
                 mate[s] = j;
 
-                if (!labeledge[bs].has_value()) {
+                // Trace one step back
+                if (labeledge[bs].first == NoNode) {
                     break;
                 }
 
-                Node t = labeledge[bs].value().first;
+                Node t = labeledge[bs].first;
                 auto bt = inblossom[t];
                 assert(label[bt] == 2);
-                auto edge = labeledge[bt].value();
-                s = edge.first;
+
+                // Trace one step back
+                s = labeledge[bt].first;
                 j = t;
 
-                if (std::holds_alternative<BlossomPtr>(bt)) {
-                    augment_blossom(std::get<BlossomPtr>(bt), j);
+                // Augment recursively
+                if (auto *blossom = std::get_if<BlossomPtr>(&bt)) {
+                    augmentBlossom(*blossom, j);
                 }
-                
-                mate[j] = s; // Add this line to ensure symmetric matching
+                mate[j] = s;
             }
         }
     }
 
-    void expand_blossom(const BlossomPtr &b, bool endstage) {
-        // Convert sub-blossoms into top-level blossoms.
+    void augmentBlossom(BlossomPtr b, Node v) {
+        // Recursively augment this blossom from vertex v
+        auto _recurse = [this](BlossomPtr b, Node v, auto &_self) -> void {
+            // Bubble up through blossom tree from vertex v
+            Node t = v;
+            NodeOrBlossom parent = makeNodeOrBlossom(b);
 
-        // Recursive lambda to handle nested expansion
-        std::function<void(const BlossomPtr &, bool)> expand_recursive;
-        expand_recursive = [&](const BlossomPtr &b, bool endstage) {
-            // Convert sub-blossoms into top-level blossoms
-            for (auto &s : b->childs) {
-                // Remove the parent pointer for each sub-vertex/blossom
-                blossomparent[s] = std::nullopt;
-
-                if (auto *sub_blossom_ptr = std::get_if<BlossomPtr>(&s)) {
-                    if (endstage && blossomdual[*sub_blossom_ptr] == 0) {
-                        // Recursively expand this sub-blossom
-                        expand_recursive(*sub_blossom_ptr, endstage);
-                    } else {
-                        // Just assign vertices to the top-level blossom
-                        for (Node v : (*sub_blossom_ptr)->leaves()) {
-                            inblossom[v] = *sub_blossom_ptr;
+            while (true) {
+                // Find position of t in b's child list
+                size_t pos = -1;
+                bool found = false;
+                for (size_t i = 0; i < b->nodeChilds.size(); i++) {
+                    if (b->nodeChilds[i] == t) {
+                        pos = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    for (size_t i = 0; i < b->blossomChilds.size(); i++) {
+                        auto child = makeNodeOrBlossom(b->blossomChilds[i]);
+                        if (child == inblossom[t]) {
+                            pos = i + b->nodeChilds.size();
+                            found = true;
+                            break;
                         }
                     }
+                }
+
+                if (blossomparent[b] != nullptr && !found) {
+                    t = NoNode;
+                    break;
+                }
+
+                if (pos == -1)
+                    break;
+
+                if (pos & 1) {
+                    // pos is odd; go forward and wrap
+                    pos -= b->nodeChilds.size() + b->blossomChilds.size();
+                    int jstep = 1;
+                    int j = pos;
+
+                    // Move along the blossom until we reach the base
+                    while (j != 0) {
+                        // Step to next sub-blossom and augment recursively
+                        j += jstep;
+                        Node w, x;
+                        if (jstep == 1) {
+                            w = b->edges[j].first;
+                            x = b->edges[j].second;
+                        } else {
+                            x = b->edges[j - 1].first;
+                            w = b->edges[j - 1].second;
+                        }
+
+                        if (j < b->nodeChilds.size()) {
+                            // Node
+                            _self(b, w, _self);
+                        } else {
+                            // Blossom
+                            auto child = b->blossomChilds[j - b->nodeChilds.size()];
+                            if (inblossom[w] == makeNodeOrBlossom(child)) {
+                                _self(child, w, _self);
+                            }
+                        }
+
+                        // Step to next sub-blossom and augment recursively
+                        j += jstep;
+                        if (j < b->nodeChilds.size()) {
+                            // Node
+                            _self(b, x, _self);
+                        } else {
+                            // Blossom
+                            auto child = b->blossomChilds[j - b->nodeChilds.size()];
+                            if (inblossom[x] == makeNodeOrBlossom(child)) {
+                                _self(child, x, _self);
+                            }
+                        }
+
+                        // Match the edge connecting the sub-blossoms
+                        mate[w] = x;
+                        mate[x] = w;
+                    }
                 } else {
-                    // Simple vertex - just assign it to itself
-                    Node v = std::get<Node>(s);
-                    inblossom[v] = v;
+                    // pos is even; go backward
+                    int jstep = -1;
+                    int j = pos;
+
+                    // Move along the blossom until we reach the base
+                    while (j != 0) {
+                        // Step to next sub-blossom and augment recursively
+                        j += jstep;
+                        Node w, x;
+                        if (jstep == 1) {
+                            w = b->edges[j].first;
+                            x = b->edges[j].second;
+                        } else {
+                            x = b->edges[j - 1].first;
+                            w = b->edges[j - 1].second;
+                        }
+
+                        if (j < b->nodeChilds.size()) {
+                            // Node
+                            _self(b, w, _self);
+                        } else {
+                            // Blossom
+                            auto child = b->blossomChilds[j - b->nodeChilds.size()];
+                            if (inblossom[w] == makeNodeOrBlossom(child)) {
+                                _self(child, w, _self);
+                            }
+                        }
+
+                        // Step to next sub-blossom and augment recursively
+                        j += jstep;
+                        if (j < b->nodeChilds.size()) {
+                            // Node
+                            _self(b, x, _self);
+                        } else {
+                            // Blossom
+                            auto child = b->blossomChilds[j - b->nodeChilds.size()];
+                            if (inblossom[x] == makeNodeOrBlossom(child)) {
+                                _self(child, x, _self);
+                            }
+                        }
+
+                        // Match the edge connecting the sub-blossoms
+                        mate[w] = x;
+                        mate[x] = w;
+                    }
+                }
+
+                // Move up to parent blossom if we're not at a top-level blossom
+                if (blossomparent[b] == nullptr)
+                    break;
+                t = v;
+                auto parent = blossomparent[b];
+                if (parent == nullptr)
+                    break;
+                b = parent;
+            }
+        };
+
+        _recurse(b, v, _recurse);
+    }
+
+    void expandBlossom(BlossomPtr b, bool endstage) {
+        // Recursive helper function
+        auto _recurse = [this](BlossomPtr b, bool endstage, auto &_self) -> void {
+            // Convert nested sub-blossoms into top-level ones
+            for (size_t i = 0; i < b->nodeChilds.size() + b->blossomChilds.size(); i++) {
+                NodeOrBlossom s;
+                if (i < b->nodeChilds.size()) {
+                    s = makeNodeOrBlossom(b->nodeChilds[i]);
+                } else {
+                    s = makeNodeOrBlossom(b->blossomChilds[i - b->nodeChilds.size()]);
+                }
+
+                // Remove parent pointer for this sub-blossom
+                if (auto *blossom = std::get_if<BlossomPtr>(&s)) {
+                    blossomparent[*blossom] = nullptr;
+                }
+
+                if (endstage && std::holds_alternative<BlossomPtr>(s)) {
+                    // Recursively expand this sub-blossom
+                    auto sb = std::get<BlossomPtr>(s);
+                    if (blossomdual[sb] == 0) {
+                        _self(sb, endstage, _self);
+                    } else {
+                        // Still in optimization stage: don't expand recursive sub-blossoms
+                        for (Node v : sb->leaves()) {
+                            inblossom[v] = s;
+                        }
+                    }
+                } else if (std::holds_alternative<Node>(s)) {
+                    inblossom[std::get<Node>(s)] = s;
                 }
             }
 
-            // If we're expanding a T-blossom during a stage (not endstage),
-            // we need to process additional label information
-            if (!endstage && label.count(b) && label[b] == 2) {
-                // Find the S-vertex through which the expanding blossom obtained its label
-                Node entrychild = std::visit([&](const auto &val) -> Node {
-                    if constexpr (std::is_same_v<std::decay_t<decltype(val)>, Node>) {
-                        return val;
-                    } else {
-                        return blossombase[val];
+            // If we expand a sub-blossom during a stage, its vertices may be reachable:
+            // add them to the queue if appropriate
+            if (!endstage && label.find(makeNodeOrBlossom(b)) != label.end() && label[makeNodeOrBlossom(b)] == 2) {
+                // B became an S-vertex/blossom; add it to queue
+                auto entrychild = inblossom[labeledge[makeNodeOrBlossom(b)].second];
+
+                // Find entrychild in b's children list
+                size_t j = -1;
+                for (size_t i = 0; i < b->nodeChilds.size(); i++) {
+                    if (makeNodeOrBlossom(b->nodeChilds[i]) == entrychild) {
+                        j = i;
+                        break;
                     }
-                },
-                                             inblossom[labeledge[b].value().second]);
+                }
+                if (j == -1) {
+                    for (size_t i = 0; i < b->blossomChilds.size(); i++) {
+                        if (makeNodeOrBlossom(b->blossomChilds[i]) == entrychild) {
+                            j = i + b->nodeChilds.size();
+                            break;
+                        }
+                    }
+                }
 
-                // Find its position in the blossom's child list
-                auto it = std::find_if(b->childs.begin(), b->childs.end(),
-                                       [&](const auto &child) {
-                                           return std::visit([&](const auto &val) -> bool {
-                                               if constexpr (std::is_same_v<std::decay_t<decltype(val)>, Node>) {
-                                                   return val == entrychild;
-                                               } else {
-                                                   return blossombase[val] == entrychild;
-                                               }
-                                           },
-                                                             child);
-                                       });
-                assert(it != b->childs.end());
-                size_t j = std::distance(b->childs.begin(), it);
-
-                // Determine traversal direction
+                // Start at the node/blossom through which the expanding blossom obtained its label
                 int jstep;
                 if (j & 1) {
-                    j -= b->childs.size();
+                    // Start index is odd; go backward and wrap
+                    j -= b->nodeChilds.size() + b->blossomChilds.size();
                     jstep = 1;
                 } else {
+                    // Start index is even; go forward
                     jstep = -1;
                 }
 
-                // Walk around the blossom maintaining labels
-                Node v = labeledge[b].value().first;
-                Node w = labeledge[b].value().second;
-
+                // Move along the blossom until we get to the base
+                Node v, w;
+                auto p = labeledge[makeNodeOrBlossom(b)];
                 while (j != 0) {
-                    // Traverse forwards or backwards through the blossom structure
+                    // Get the next vertex to assign label to
                     if (jstep == 1) {
-                        Node p = b->edges[j].first;
-                        Node q = b->edges[j].second;
-
-                        // Label the T-vertex
-                        label.erase(w);
-                        label.erase(q);
-                        assign_label(w, 2, v);
-
-                        // Allow the connecting edge
-                        allowedge[{p, q}] = allowedge[{q, p}] = true;
-                        j += jstep;
-
-                        // Update v and w for next iteration
                         v = b->edges[j].first;
                         w = b->edges[j].second;
                     } else {
-                        Node q = b->edges[j - 1].first;
-                        Node p = b->edges[j - 1].second;
-
-                        // Label the T-vertex
-                        label.erase(w);
-                        label.erase(q);
-                        assign_label(w, 2, v);
-
-                        // Allow the connecting edge
-                        allowedge[{p, q}] = allowedge[{q, p}] = true;
-                        j += jstep;
-
-                        // Update v and w for next iteration
-                        w = b->edges[j - 1].first;
                         v = b->edges[j - 1].second;
+                        w = b->edges[j - 1].first;
+                    }
+
+                    // Extend the S-path by assigning label T to w
+                    label[w] = label[inblossom[w]] = NoNode;
+                    label[v] = label[inblossom[v]] = NoNode;
+                    assignLabel(w, 2, v);
+                    allowedge[{v, w}] = allowedge[{w, v}] = true;
+                    j += jstep;
+
+                    // Step to the next S-vertex/blossom and assign label S
+                    if (jstep == 1) {
+                        v = b->edges[j].first;
+                        w = b->edges[j].second;
+                    } else {
+                        v = b->edges[j - 1].second;
+                        w = b->edges[j - 1].first;
                     }
                     allowedge[{v, w}] = allowedge[{w, v}] = true;
                     j += jstep;
                 }
 
-                // Relabel the base T-vertex
-                auto bw = b->childs[j];
+                // Assign label to base
+                auto bw = (j < b->nodeChilds.size()) ? makeNodeOrBlossom(b->nodeChilds[j]) : makeNodeOrBlossom(b->blossomChilds[j - b->nodeChilds.size()]);
                 label[w] = label[bw] = 2;
-                labeledge[w] = labeledge[bw] = Edge(v, w);
-                bestedge[bw] = std::nullopt;
+                labeledge[w] = labeledge[bw] = p;
+                bestedge[bw] = std::make_pair(NoNode, NoNode);
 
-                // Continue consistently labeling the rest of the blossom
+                // Continue along the blossom until we get back to entrychild
                 j += jstep;
-                while (std::visit([&](const auto &val) -> bool {
-                    if constexpr (std::is_same_v<std::decay_t<decltype(val)>, Node>) {
-                        return val != entrychild;
-                    } else {
-                        return blossombase[val] != entrychild;
-                    }
-                },
-                                  b->childs[j])) {
-                    auto bv = b->childs[j];
-                    if (label.count(bv) && label[bv] == 1) {
+                while (true) {
+                    // Examine the next vertex in the blossom
+                    auto bv = (j < b->nodeChilds.size()) ? makeNodeOrBlossom(b->nodeChilds[j]) : makeNodeOrBlossom(b->blossomChilds[j - b->nodeChilds.size()]);
+                    if (bv == entrychild)
+                        break;
+
+                    if (label.find(bv) == label.end() || label[bv] == 1) {
                         j += jstep;
                         continue;
                     }
 
-                    // Find the vertex to relabel
-                    Node v;
-                    if (auto *sub_blossom_ptr = std::get_if<BlossomPtr>(&bv)) {
-                        v = [&]() -> Node {
-                            for (Node vertex : (*sub_blossom_ptr)->leaves()) {
-                                if (label.count(vertex))
-                                    return vertex;
-                            }
-                            assert(false);
-                            return -1;
-                        }();
+                    // Get vertices for this sub-blossom
+                    std::vector<Node> vertices;
+                    if (std::holds_alternative<BlossomPtr>(bv)) {
+                        auto subblossom = std::get<BlossomPtr>(bv);
+                        vertices = subblossom->leaves();
                     } else {
-                        v = std::get<Node>(bv);
+                        vertices = {std::get<Node>(bv)};
                     }
 
-                    // Verify it's a T-vertex and relabel it
-                    if (label.count(v)) {
-                        assert(label[v] == 2);
-                        assert(inblossom[v] == bv);
-                        label.erase(v);
-                        label.erase(mate[blossombase[bv]]);
-                        assign_label(v, 2, labeledge[v].value().first);
+                    for (Node v : vertices) {
+                        if (label.find(inblossom[v]) != label.end()) {
+                            assert(label[inblossom[v]] == 2);
+                            assert(inblossom[v] == bv);
+                            label[v] = NoNode;
+                            label[mate[blossombase[bv]]] = NoNode;
+                            assignLabel(v, 2, labeledge[v].first);
+                        }
                     }
                     j += jstep;
                 }
             }
 
-            // Clean up the expanding blossom
-            label.erase(b);
-            labeledge.erase(b);
-            bestedge.erase(b);
+            // Clean up
+            label.erase(makeNodeOrBlossom(b));
+            labeledge.erase(makeNodeOrBlossom(b));
+            bestedge.erase(makeNodeOrBlossom(b));
             blossomparent.erase(b);
-            blossombase.erase(b);
+            blossombase.erase(makeNodeOrBlossom(b));
             blossomdual.erase(b);
         };
 
-        // Start the recursive expansion
-        expand_recursive(b, endstage);
+        _recurse(b, endstage, _recurse);
     }
 
   public:
-    GraphMatching(const std::vector<std::vector<Weight>> &graph_matrix)
-        : graph(graph_matrix),
-          num_nodes(graph_matrix.size()) {
-    }
-
-    // Get the final matching result
-    MatchingResult get_matching() const {
-        MatchingResult result;
-        std::vector<Node> nodes;
-        for (Node i = 0; i < num_nodes; i++) {
-            nodes.push_back(i);
-        }
-
-        // Need to check both k->v and v->k in mate map
-        for (Node k = 0; k < num_nodes; k++) {
-            auto it = mate.find(k);
-            if (it != mate.end()) {
-                Node v = it->second;
-                if (k < v && nodes[k] != -1 && nodes[v] != -1) {
-                    result.matches.emplace_back(k, v);
-                    nodes[k] = nodes[v] = -1;
-                }
-            }
-        }
-
-        // Find remaining unmatched node
-        auto it = std::find_if(nodes.begin(), nodes.end(),
-                               [](Node n) { return n != -1; });
-        if (it != nodes.end()) {
-            result.remaining_node = *it;
-        }
-
-        return result;
-    }
-
-    MatchingResult max_weight_matching() {
-        for (const auto &adj : graph)
-            for (const auto &wei : adj)
-                max_weight = std::max(max_weight, wei);
-
-        // Initialize inblossom map
-        for (Node i = 0; i < num_nodes; ++i) {
-            inblossom[i] = i;
-            blossombase[i] = i;
-            bestedge[i] = std::nullopt;
-            dualvar[i] = max_weight;
-        }
-
+    std::pair<std::vector<std::pair<Node, Node>>, Node> maxWeightMatching() {
         // Main loop: continue until no further improvement is possible
         while (true) {
-            // Reset all labels and status
+            // Clear all labels, edges and queues
             label.clear();
             labeledge.clear();
             bestedge.clear();
-            for (const auto &[b, _] : blossomdual) {
-                b->mybestedges = std::nullopt;
+            // Clear mybestedges for all blossoms
+            for (const auto &[blossom, _] : blossomdual) {
+                blossom->myBestEdges.clear();
             }
             allowedge.clear();
             queue.clear();
 
-            // Label single vertices with S
-            for (Node v = 0; v < num_nodes; ++v) {
-                if (!mate.count(v) && !label.count(inblossom[v])) {
-                    assign_label(v, 1, std::nullopt);
+            // Label single vertices with S and put them in queue
+            for (Node v : gnodes) {
+                if (mate.find(v) == mate.end() && label.find(inblossom[v]) == label.end()) {
+                    assignLabel(v, 1, NoNode);
                 }
             }
 
             // Loop until we succeed in augmenting the matching
             bool augmented = false;
             while (true) {
-                // Keep searching for a path while we have vertices in queue
+                // Keep processing until queue is empty
                 while (!queue.empty() && !augmented) {
                     Node v = queue.back();
                     queue.pop_back();
+
                     assert(label[inblossom[v]] == 1);
 
-                    // Look at neighbors of v
-                    for (Node w = 0; w < num_nodes; ++w) {
+                    // Look for neighbours w
+                    for (Node w = 0; w < num_nodes; w++) {
                         if (v == w)
                             continue;
 
+                        // w is a neighbour of v?
                         auto bv = inblossom[v];
                         auto bw = inblossom[w];
                         if (bv == bw)
-                            continue; // Skip vertices in same blossom
+                            continue;
 
-                        if (!allowedge.count({v, w})) {
-                            // Compute slack
-                            Weight kslack = slack(v, w);
+                        // Check if (v,w) is an allowable edge
+                        if (allowedge.find({v, w}) == allowedge.end()) {
+                            int kslack = slack(v, w);
                             if (kslack <= 0) {
-                                // Edge is allowable - label endpoint
                                 allowedge[{v, w}] = allowedge[{w, v}] = true;
                             }
                         }
 
-                        if (allowedge.count({v, w})) {
-                            if (!label.count(bw)) {
-                                // (b) is unexposed; label with T and add to queue
-                                assign_label(w, 2, v);
+                        if (allowedge.find({v, w}) != allowedge.end()) {
+                            if (label.find(bw) == label.end()) {
+                                // (b) w is not labeled; label it T and add to queue
+                                assignLabel(w, 2, v);
                             } else if (label[bw] == 1) {
-                                // (c) is an S-vertex - handle blossom
-                                auto base = scan_blossom(v, w);
-                                if (base) {
-                                    add_blossom(*base, v, w);
+                                // (c) w is an S-vertex; look for an augmenting path
+                                Node base = scanBlossom(v, w);
+                                if (base != NoNode) {
+                                    // Found a new blossom; add it to the blossom bookkeeping
+                                    addBlossom(base, v, w);
                                 } else {
-                                    // Found an augmenting path
-                                    augment_matching(v, w);
+                                    // Found an augmenting path; augment the matching and end this phase
+                                    augmentMatching(v, w);
                                     augmented = true;
                                     break;
                                 }
-                            } else if (!label.count(w)) {
+                            } else if (label[w] == NoNode) {
+                                // w's blossom is labeled T; propagate label to w
                                 assert(label[bw] == 2);
                                 label[w] = 2;
-                                labeledge[w] = Edge(v, w);
+                                labeledge[w] = std::make_pair(v, w);
                             }
-                        } else if (label[bw] == 1) {
-                            // Keep track of the least-slack edge to the blossom
-                            if (!bestedge.count(bv) || !bestedge[bv].has_value() ||
-                                (bestedge[bv].has_value() && slack(v, w) < slack(bestedge[bv].value().first, bestedge[bv].value().second))) {
-                                bestedge[bv] = Edge(v, w);
+                        } else {
+                            // This is where we need to fix the logic
+                            int kslack = slack(v, w);
+
+                            // First case: bw is an S-vertex/blossom
+                            if (label.find(bw) != label.end() && label[bw] == 1) {
+                                if (bestedge.find(bv) == bestedge.end() || (bestedge[bv].first == NoNode && bestedge[bv].second == NoNode) ||
+                                    kslack < slack(bestedge[bv].first, bestedge[bv].second)) {
+                                    bestedge[bv] = std::make_pair(v, w);
+                                }
                             }
-                        } else if (!label.count(w)) {
-                            if (!bestedge.count(w) || !bestedge[w].has_value() ||
-                                (bestedge[w].has_value() && slack(v, w) < slack(bestedge[w].value().first, bestedge[w].value().second))) {
-                                bestedge[w] = Edge(v, w);
+                            // Second case: w is unlabeled
+                            else if (label.find(w) == label.end() || label[w] == NoNode) {
+                                if (bestedge.find(w) == bestedge.end() ||
+                                    kslack < slack(bestedge[w].first, bestedge[w].second)) {
+                                    bestedge[w] = std::make_pair(v, w);
+                                }
                             }
                         }
                     }
                 }
 
-                if (augmented) {
+                if (augmented)
                     break;
+
+                // There is no augmenting path under these constraints;
+                // compute delta and reduce slack in optimization problem
+                int deltatype = -1;
+                int delta = 0;
+                std::pair<Node, Node> deltaedge = {NoNode, NoNode};
+                BlossomPtr deltablossom = nullptr;
+
+                // Compute delta1: the minimum value of any vertex dual
+                if (deltatype == -1) {
+                    deltatype = 1;
+                    delta = std::numeric_limits<int>::max();
+                    for (const auto &[v, dual] : dualvar) {
+                        if (std::holds_alternative<Node>(v)) {
+                            delta = std::min(delta, dual);
+                        }
+                    }
                 }
 
-                // No augmenting path found - compute delta for dual variables
-                int deltatype = -1;
-                Weight delta;
-                std::optional<Edge> deltaedge;
-                std::optional<BlossomPtr> deltablossom;
-
-                // Check if we can improve dual variables
-                for (Node v = 0; v < num_nodes; ++v) {
-                    if (!label.count(inblossom[v]) && bestedge.count(v)) {
-                        Weight d = slack(bestedge[v].value().first, bestedge[v].value().second);
+                // Compute delta2: the minimum slack on any edge between an S-vertex and an unlabeled vertex
+                for (Node v : gnodes) {
+                    if (label.find(inblossom[v]) == label.end() && bestedge.find(v) != bestedge.end()) {
+                        int d = slack(bestedge[v].first, bestedge[v].second);
                         if (deltatype == -1 || d < delta) {
                             delta = d;
                             deltatype = 2;
@@ -747,50 +805,58 @@ class GraphMatching {
                     }
                 }
 
+                // Compute delta3: half the minimum slack on any edge between a pair of S-blossoms
                 for (const auto &[b, _] : blossomparent) {
-                    if (!blossomparent[b].has_value() && label.count(b) && label[b] == 1 && bestedge.count(b)) {
-                        Weight kslack = slack(bestedge[b].value().first, bestedge[b].value().second);
-                        Weight d = kslack / 2;
+                    if (blossomparent[b] == nullptr &&
+                        label.find(makeNodeOrBlossom(b)) != label.end() &&
+                        label[makeNodeOrBlossom(b)] == 1 &&
+                        bestedge.find(makeNodeOrBlossom(b)) != bestedge.end()) {
+                        int kslack = slack(bestedge[makeNodeOrBlossom(b)].first, bestedge[makeNodeOrBlossom(b)].second);
+                        int d = allinteger ? (kslack / 2) : (kslack / 2.0);
                         if (deltatype == -1 || d < delta) {
                             delta = d;
                             deltatype = 3;
-                            deltaedge = bestedge[b];
+                            deltaedge = bestedge[makeNodeOrBlossom(b)];
                         }
                     }
                 }
 
-                for (const auto &[b, dual] : blossomdual) {
-                    if (!blossomparent[b].has_value() && label.count(b) && label[b] == 2 &&
-                        (deltatype == -1 || dual < delta)) {
-                        delta = dual;
-                        deltatype = 4;
-                        deltablossom = b;
+                // Compute delta4: minimum z variable of any T-blossom
+                for (const auto &[b, d] : blossomdual) {
+                    if (blossomparent[b] == nullptr &&
+                        label.find(makeNodeOrBlossom(b)) != label.end() &&
+                        label[makeNodeOrBlossom(b)] == 2) {
+                        if (deltatype == -1 || d < delta) {
+                            delta = d;
+                            deltatype = 4;
+                            deltablossom = b;
+                        }
                     }
                 }
 
                 if (deltatype == -1) {
-                    deltatype = 1;
-                    delta = std::max(Weight(0), std::min_element(dualvar.begin(), dualvar.end(), [](const auto &a, const auto &b) { return a.second < b.second; })->second);
+                    // No further improvement possible; optimum reached
+                    break;
                 }
 
                 // Update dual variables
-                // std::cout << "deltatype: " << deltatype << ", delta: " << delta << "\n";
-                for (Node v = 0; v < num_nodes; ++v) {
-                    if (label.count(inblossom[v])) {
-                        if (label[inblossom[v]] == 1) {
-                            dualvar[v] -= delta;
-                        } else if (label[inblossom[v]] == 2) {
-                            dualvar[v] += delta;
+                for (Node v : gnodes) {
+                    auto bv = inblossom[v];
+                    if (label.find(bv) != label.end()) {
+                        if (label[bv] == 1) {
+                            dualvar[makeNodeOrBlossom(v)] -= delta;
+                        } else if (label[bv] == 2) {
+                            dualvar[makeNodeOrBlossom(v)] += delta;
                         }
                     }
                 }
 
-                for (const auto &[b, dual] : blossomdual) {
-                    if (!blossomparent[b].has_value()) {
-                        if (label.count(b)) {
-                            if (label[b] == 1) {
+                for (const auto &[b, _] : blossomparent) {
+                    if (blossomparent[b] == nullptr) {
+                        if (label.find(makeNodeOrBlossom(b)) != label.end()) {
+                            if (label[makeNodeOrBlossom(b)] == 1) {
                                 blossomdual[b] += delta;
-                            } else if (label[b] == 2) {
+                            } else if (label[makeNodeOrBlossom(b)] == 2) {
                                 blossomdual[b] -= delta;
                             }
                         }
@@ -799,17 +865,19 @@ class GraphMatching {
 
                 // Take action at the point where minimum delta occurred
                 if (deltatype == 1) {
-                    break; // No further improvement possible
+                    break;
                 } else if (deltatype == 2) {
-                    allowedge[deltaedge.value()] = allowedge[{deltaedge.value().second, deltaedge.value().first}] = true;
-                    Node v = deltaedge.value().first;
+                    // Add edge (v,w) to allowedge
+                    allowedge[deltaedge] = allowedge[{deltaedge.second, deltaedge.first}] = true;
+                    Node v = deltaedge.first;
                     queue.push_back(v);
                 } else if (deltatype == 3) {
-                    allowedge[deltaedge.value()] = allowedge[{deltaedge.value().second, deltaedge.value().first}] = true;
-                    Node v = deltaedge.value().first;
+                    // Add edge (v,w) to allowedge
+                    allowedge[deltaedge] = allowedge[{deltaedge.second, deltaedge.first}] = true;
+                    Node v = deltaedge.first;
                     queue.push_back(v);
                 } else if (deltatype == 4) {
-                    expand_blossom(deltablossom.value(), false);
+                    expandBlossom(deltablossom, false);
                 }
             }
 
@@ -823,73 +891,59 @@ class GraphMatching {
             }
 
             // Expand all S-blossoms with zero dual
-            for (const auto &[b, dual] : blossomdual) {
-                if (!blossomparent[b].has_value() && label.count(b) &&
-                    label[b] == 1 && dual == 0) {
-                    expand_blossom(b, true);
+            for (auto it = blossomdual.begin(); it != blossomdual.end();) {
+                auto b = it->first;
+                ++it; // Increment iterator before potential erasure
+
+                if (blossomdual.find(b) == blossomdual.end())
+                    continue;
+
+                if (blossomparent[b] == nullptr &&
+                    label.find(makeNodeOrBlossom(b)) != label.end() &&
+                    label[makeNodeOrBlossom(b)] == 1 &&
+                    blossomdual[b] == 0) {
+                    expandBlossom(b, true);
                 }
             }
         }
 
-        // Return the final matching
         return get_matching();
     }
 
-    MatchingResult min_weight_matching() {
-        // Get number of nodes from matrix dimensions
-        size_t num_nodes = graph.size();
-        if (num_nodes == 0) {
-            return MatchingResult{}; // Return empty result for empty graph
+    std::pair<std::vector<std::pair<Node, Node>>, Node> get_matching() {
+        std::vector<std::pair<Node, Node>> matching;
+        std::vector<int> mark(graph_matrix.size(), 0);
+        Node remaining_node = -1;
+        for (const auto &[v, w] : mate) {
+            if (v < w) {
+                matching.emplace_back(v, w);
+                mark[v] = mark[w] = 1;
+            }
         }
-
-        for (size_t i = 0; i < num_nodes; ++i) {
-            for (size_t j = 0; j < num_nodes; ++j) {
-                if (i != j && graph[i][j] != 0) {
-                    graph[i][j] = (max_weight + 1) - graph[i][j];
-                }
+        for (const auto &node : mark) {
+            if (node == 0) {
+                remaining_node = node;
+                break;
             }
         }
 
-        return max_weight_matching();
+        return {matching, remaining_node};
     }
 };
 
-// Utility function to create a test graph
-std::vector<std::vector<Weight>> create_test_graph(size_t num_nodes) {
-    std::vector<std::vector<Weight>> matrix(num_nodes,
-                                            std::vector<Weight>(num_nodes, 0));
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(1.0, 50.0);
-
-    for (size_t i = 0; i < num_nodes; ++i) {
-        for (size_t j = i + 1; j < num_nodes; ++j) {
-            Weight weight = dis(gen);
-            matrix[i][j] = weight;
-            matrix[j][i] = weight; // Make it symmetric
-        }
-    }
-
-    for (size_t i = 0; i < num_nodes; ++i) {
-        for (size_t j = 0; j < num_nodes; ++j) {
-            std::cout << matrix[i][j] << " ";
-        }
-        std::cout << "\n";
-    }
-
-    return matrix;
-}
-
 int main() {
-    auto matrix = create_test_graph(6);
-    // freopen("inp.txt", "r", stdin);
-    // for (int i = 0; i < 6; i++)
-    //     for (int j = 0; j < 6; j++)
-    //         std::cin >> matrix[i][j];
-    auto match = GraphMatching(matrix);
-    auto [matches, remaining_node] = match.max_weight_matching();
-    for (const auto &[u, v] : matches)
+    auto num_of_nodes = 4;
+    std::vector<std::vector<int>> matrix(num_of_nodes, std::vector<int>(num_of_nodes, 0));
+    freopen("inp.txt", "r", stdin);
+    for (int i = 0; i < num_of_nodes; i++) {
+        for (int j = 0; j < num_of_nodes; j++) {
+            std::cin >> matrix[i][j];
+        }
+    }
+    MaxWeightMatching match(matrix);
+    auto [matching, remaining_node] = match.maxWeightMatching();
+    for (auto const &[u, v] : matching) {
         std::cout << u << " " << v << "\n";
-    return 0;
+    }
+    return 1;
 }

@@ -47,13 +47,14 @@ struct Request {
 struct Route {
     int depot;
     std::list<int> list_reqs;
-    ll cost;
+    ll complete_cost;
+    ll travel_cost;
 
     // Default constructor
-    Route() : depot(0), cost(0) {}
+    Route() : depot(0), complete_cost(0), travel_cost(0) {}
 
     // Constructor with depot
-    Route(int d) : depot(d), cost(0) {}
+    Route(int d) : depot(d), complete_cost(0), travel_cost(0) {}
 
     // Get size of the route
     size_t size() const {
@@ -303,13 +304,13 @@ class PDPSolver_subtask_3 {
                         calculateRequestTransitionCost(prev_req, next_req);
         }
 
-        return route.cost + costDelta;
+        return route.complete_cost + costDelta;
     }
 
     ll calculateRemovalCost(Route &route, const int request_id) {
         auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), request_id);
         if (it == route.list_reqs.end())
-            return route.cost; // Request not found
+            return route.complete_cost; // Request not found
 
         const Request &req = requests[request_id];
         ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
@@ -342,12 +343,12 @@ class PDPSolver_subtask_3 {
             costDelta += calculateRequestTransitionCost(prev_req, next_req);
         }
 
-        return route.cost + costDelta;
+        return route.complete_cost + costDelta;
     }
 
     ll calculateRemovalCost(Route &route, std::list<int>::iterator it) {
         if (it == route.list_reqs.end())
-            return route.cost; // Request not found
+            return route.complete_cost; // Request not found
 
         auto request_id = *it;
         const Request &req = requests[request_id];
@@ -381,7 +382,7 @@ class PDPSolver_subtask_3 {
             costDelta += calculateRequestTransitionCost(prev_req, next_req);
         }
 
-        return route.cost + costDelta;
+        return route.complete_cost + costDelta;
     }
 
     void removeStopsByRequestId(Route &route, int request_id) {
@@ -392,7 +393,7 @@ class PDPSolver_subtask_3 {
         route.list_reqs.remove(request_id);
 
         // Update route cost
-        route.cost = newCost;
+        route.complete_cost = newCost;
     }
 
     void removeStopsByRequestIt(Route &route, std::list<int>::iterator it) {
@@ -403,59 +404,7 @@ class PDPSolver_subtask_3 {
         route.list_reqs.erase(it);
 
         // Update route cost
-        route.cost = newCost;
-    }
-
-    // Helper function to calculate route cost
-    ll calculateRouteCost(const Route &route) {
-        if (route.list_reqs.empty()) {
-            return getDistance(route.depot, route.depot);
-        }
-
-        ll total_cost = 0;
-        bool has_trailer = false;
-        int prev_point = route.depot;
-
-        for (const int request_id : route.list_reqs) {
-            const Request &req = requests[request_id];
-
-            // Handle trailer pickup if needed
-            if (req.pickup_action == PICKUP_CONTAINER && !has_trailer) {
-                total_cost += getDistance(prev_point, trailer_point) + trailer_pickup_time;
-                prev_point = trailer_point;
-                has_trailer = true;
-            } else if (req.pickup_action == PICKUP_CONTAINER_TRAILER && has_trailer) {
-                total_cost += getDistance(prev_point, trailer_point) + trailer_pickup_time;
-                prev_point = trailer_point;
-                has_trailer = false;
-            }
-
-            // Add distance to pickup point and pickup operation
-            total_cost += getDistance(prev_point, req.pickup_point);
-            total_cost += req.pickup_duration;
-            prev_point = req.pickup_point;
-
-            // Add distance to drop point and drop operation
-            total_cost += getDistance(prev_point, req.drop_point);
-            total_cost += req.drop_duration;
-            prev_point = req.drop_point;
-
-            // Update trailer status
-            if (req.pickup_action == PICKUP_CONTAINER_TRAILER)
-                has_trailer = true;
-            if (req.drop_action == DROP_CONTAINER_TRAILER)
-                has_trailer = false;
-        }
-
-        // Handle final trailer drop if needed
-        if (has_trailer) {
-            total_cost += getDistance(prev_point, trailer_point) + trailer_pickup_time;
-            prev_point = trailer_point;
-        }
-
-        // Return to depot
-        total_cost += getDistance(prev_point, route.depot);
-        return total_cost;
+        route.complete_cost = newCost;
     }
 
     // The updateRequestContext method becomes cleaner without trailer tracking
@@ -505,7 +454,7 @@ class PDPSolver_subtask_3 {
         std::vector<std::pair<ll, int>> routeCosts;
         for (int i = 0; i < num_vehicles; i++) {
             if (!currentSolution[i].list_reqs.empty()) {
-                routeCosts.push_back({currentSolution[i].cost, i});
+                routeCosts.push_back({currentSolution[i].complete_cost, i});
             }
         }
 
@@ -614,7 +563,7 @@ class PDPSolver_subtask_3 {
             if (bestRoute != -1) {
                 Route &route = currentSolution[bestRoute];
                 bestPosition = route.list_reqs.insert(bestPosition, req_id);
-                route.cost = bestCost;
+                route.complete_cost = bestCost;
                 isRequestRemoved[req_id] = false;
                 requestContexts[req_id].position = bestPosition;
                 requestContexts[req_id].routeIdx = bestRoute;
@@ -629,7 +578,7 @@ class PDPSolver_subtask_3 {
     ll calculateF1() {
         ll maxCost = 0;
         for (const Route &route : currentSolution) {
-            maxCost = std::max(maxCost, route.cost);
+            maxCost = std::max(maxCost, route.complete_cost);
         }
         return maxCost;
     }
@@ -637,7 +586,7 @@ class PDPSolver_subtask_3 {
     ll calculateF2() {
         ll totalCost = 0;
         for (const Route &route : currentSolution) {
-            totalCost += route.cost;
+            totalCost += route.complete_cost;
         }
         return totalCost;
     }

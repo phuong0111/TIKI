@@ -89,6 +89,7 @@ def checkValidRouteAndCalculateScore(truck_id: int, routes: list[str]):
 
         # Update times
         completion_time += distances[prev_point][point]  # Total time includes travel
+        travel_time += distances[prev_point][point]  # 
         
         # Add service times to completion time only (not to travel time)
         if action in [PICKUP_TRAILER, DROP_TRAILER]:
@@ -108,7 +109,8 @@ with open("tc/1/out.txt") as f:
     sys.stdin = f
     _ = int(input().split()[-1]) 
     assert _ == num_of_routes
-    completion_times = []  # For F1
+    f1 = []  # For F1
+    f2 = []  # For F2
     
     check = True
     message = ""
@@ -126,12 +128,15 @@ with open("tc/1/out.txt") as f:
             check = False
             message = msg
             break
+        
+        print(f"Route {_}: {completion_time}")
             
-        completion_times.append(completion_time)
+        f1.append(completion_time)
+        f2.append(travel_time)
         
     if check:
-        F1 = max(completion_times)  # Maximum completion time
-        F2 = sum(completion_times)      # Total travel time
+        F1 = max(f1)  # Maximum completion time
+        F2 = sum(f2)      # Total travel time
         F = alpha * F1 + F2         # Combined objective
         
         print(f"F1 (Max completion time) = {F1}")

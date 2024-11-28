@@ -384,8 +384,6 @@ def max_weight_matching(graph_matrix, maxcardinality=True):
             while queue and not augmented:
                 v = queue.pop()
                 assert label[inblossom[v]] == 1
-                print(f"\nPython - Processing v={v} from queue")
-                print(f"Python - Current label[inblossom[v]]={label[inblossom[v]]}")
                 
                 for w in range(num_nodes):
                     if v == w:
@@ -396,23 +394,16 @@ def max_weight_matching(graph_matrix, maxcardinality=True):
                         continue
                     if (v, w) not in allowedge:
                         kslack = slack(v, w)
-                        print(f"Python - Edge ({v},{w}) slack={kslack}")
                         if kslack <= 0:
-                            print(f"Python - Allowing edge ({v},{w}) due to zero slack")
                             allowedge[(v, w)] = allowedge[(w, v)] = True
                     if (v, w) in allowedge:
-                        print(f"Python - Checking allowed edge ({v},{w}): label[bw]={label.get(bw)}")
                         if label.get(bw) is None:
-                            print(f"Python - Assigning label 2 to w={w}")
                             assignLabel(w, 2, v)
                         elif label.get(bw) == 1:
-                            print(f"Python - Found S-vertex, scanning blossom")
                             base = scanBlossom(v, w)
                             if base is not NoNode:
-                                print(f"Python - Adding blossom with base={base}")
                                 addBlossom(base, v, w)
                             else:
-                                print(f"Python - Found augmenting path between {v} and {w}")
                                 augmentMatching(v, w)
                                 augmented = 1
                                 break
@@ -421,6 +412,8 @@ def max_weight_matching(graph_matrix, maxcardinality=True):
                             label[w] = 2
                             labeledge[w] = (v, w)
                     elif label.get(bw) == 1:
+                        print(v)
+                        print(bestedge)
                         if bestedge.get(bv) is None or kslack < slack(*bestedge[bv]):
                             bestedge[bv] = (v, w)
                     elif label.get(w) is None:
@@ -428,13 +421,10 @@ def max_weight_matching(graph_matrix, maxcardinality=True):
                             bestedge[w] = (v, w)
 
             if augmented:
-                print("Python - Breaking inner loop - found augmenting path")
                 break
 
             # There is no augmenting path under these constraints;
             # compute delta and reduce slack in the optimization problem.
-            print("\nPython - Computing delta")
-            print(f"Python - Current bestedge: {bestedge}")
             deltatype = -1
             delta = deltaedge = deltablossom = None
 
@@ -476,8 +466,6 @@ def max_weight_matching(graph_matrix, maxcardinality=True):
             if deltatype == -1:
                 deltatype = 1
                 delta = max(0, min(dualvar.values()))
-                
-            print(f"Python - Computed deltatype={deltatype}, delta={delta}")
 
             # Update dual variables according to delta
             for v in gnodes:
@@ -494,7 +482,6 @@ def max_weight_matching(graph_matrix, maxcardinality=True):
 
             # Take action at the point where minimum delta occurred
             if deltatype == 1:
-                print("Python - Breaking due to deltatype=1")
                 break
             elif deltatype == 2:
                 (v, w) = deltaedge
@@ -514,7 +501,6 @@ def max_weight_matching(graph_matrix, maxcardinality=True):
             assert mate[mate[v]] == v
 
         if not augmented:
-            print("Python - No augmentation possible, breaking main loop")
             break
 
         # Expand all S-blossoms with zero dual
@@ -580,7 +566,8 @@ def create_test_graph(num_nodes):
 # Test the implementation
 if __name__ == "__main__":
     # Create a test graph
-    num_nodes = 6
+    # num_nodes = 100
+    # test_matrix = create_test_graph(num_nodes=num_nodes)
     test_matrix = []
     import sys
     with open("inp.txt") as f:

@@ -360,7 +360,7 @@ class PDPSolver:
             best_route = -1
             best_position = -1
 
-            for route_idx in range(self.num_vehicles):
+            for route_idx in range(1):
                 route = current_solution[route_idx]
                 for pos in range(len(route.list_reqs) + 1):
                     new_cost = self.calculate_insertion_cost(route, req_id, pos)
@@ -446,8 +446,8 @@ class PDPSolver:
                             current_solution[i].list_reqs = route.list_reqs.copy()
                             current_solution[i].cost = route.cost
 
-            if iter % 100 == 0:
-                print(f"{iter = } {current_solution_cost = }")
+            # if iter % 100 == 0:
+            #     print(f"{iter = } {current_solution_cost = }")
 
             current_temp *= self.cooling_rate
             if elapsed_time >= 29.50:
@@ -596,10 +596,10 @@ def main():
     import sys
 
     start_time = time.time()
-    with open("tc/6/inp.txt", "r") as f:
-        sys.stdin = f
-        io.input()
-    # io.input()
+    # with open("tc/6/inp.txt", "r") as f:
+    #     sys.stdin = f
+    #     io.input()
+    io.input()
     # with open("tc/1/out.txt", "w") as f:
     #     sys.stdout = f
     #     io.output()
