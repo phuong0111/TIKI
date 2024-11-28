@@ -29,8 +29,20 @@ pair<T, T>& operator+=(pair<T, T>& p1, const pair<T, T>& p2) {
 }
 
 template <typename T>
+pair<T, T>& operator-=(pair<T, T>& p1, const pair<T, T>& p2) {
+    p1.first -= p2.first;
+    p1.second -= p2.second;
+    return p1;
+}
+
+template <typename T>
 bool operator<(pair<T, T>& p1, const pair<T, T>& p2) {
     return p1.first < p2.first || (p1.first == p2.first && p1.second < p2.second);
+}
+
+template <typename T>
+bool operator>(pair<T, T>& p1, const pair<T, T>& p2) {
+    return p1.first > p2.first || (p1.first == p2.first && p1.second > p2.second);
 }
 
 const int MAX_POINT = 1001;
