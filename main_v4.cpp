@@ -3,6 +3,36 @@ using namespace std;
 
 typedef long int ll;
 
+// Overload + operator for pairs
+template <typename T>
+pair<T, T> operator+(const pair<T, T> &p1, const pair<T, T> &p2) {
+    return {p1.first + p2.first, p1.second + p2.second};
+}
+
+template <typename T>
+pair<T, T> operator-(const pair<T, T> &p1, const pair<T, T> &p2) {
+    return {p1.first - p2.first, p1.second - p2.second};
+}
+
+template <typename T>
+pair<T, T>& operator-=(pair<T, T>& p1, const pair<T, T>& p2) {
+    p1.first -= p2.first;
+    p1.second -= p2.second;
+    return p1;
+}
+
+template <typename T>
+pair<T, T>& operator+=(pair<T, T>& p1, const pair<T, T>& p2) {
+    p1.first += p2.first;
+    p1.second += p2.second;
+    return p1;
+}
+
+template <typename T>
+bool operator<(pair<T, T>& p1, const pair<T, T>& p2) {
+    return p1.first < p2.first || (p1.first == p2.first && p1.second < p2.second);
+}
+
 const int MAX_POINT = 1001;
 const int MAX_VEHICLES = 501;
 const int MAX_REQUESTS = 1001;
@@ -165,18 +195,6 @@ std::vector<std::vector<ll>> graphWeight;
 std::vector<std::vector<int>> combinationType;
 int idx = 0, n_new = 0, n_total = 0;
 
-// // Cache arrays
-// std::array<ll, MAX_REQUESTS> request_context_cache;
-// std::array<std::array<ll, MAX_REQUESTS>, MAX_POINT> depot_to_request_cache;
-// std::array<std::array<ll, MAX_POINT>, MAX_REQUESTS> request_to_depot_cache;
-// std::array<std::array<ll, MAX_REQUESTS>, MAX_REQUESTS> request_transition_cache;
-
-// // Cache validation arrays
-// std::array<bool, MAX_REQUESTS> request_context_valid;
-// std::array<std::array<bool, MAX_REQUESTS>, MAX_POINT> depot_to_request_valid;
-// std::array<std::array<bool, MAX_POINT>, MAX_REQUESTS> request_to_depot_valid;
-// std::array<std::array<bool, MAX_REQUESTS>, MAX_REQUESTS> request_transition_valid;
-
 class PDPSolver_subtask_3 {
   private:
     std::vector<int> requestIdx;
@@ -198,80 +216,63 @@ class PDPSolver_subtask_3 {
         return distances[from][to];
     }
 
-    ll calculateRequestContextCost(const Request &req) {
-        // if (request_context_valid[req.id]) {
-        //     return request_context_cache[req.id];
-        // }
-        ll cost = req.pickup_duration + req.drop_duration +
-                  getDistance(req.pickup_point, req.drop_point);
-        // request_context_cache[req.id] = cost;
-        // request_context_valid[req.id] = true;
-        return cost;
+    std::pair<ll, ll> calculateRequestContextCost(const Request &req) {
+        ll travel_cost = getDistance(req.pickup_point, req.drop_point);
+        ll complete_cost = travel_cost + req.pickup_duration + req.drop_duration;
+        return {complete_cost, travel_cost};
     }
 
-    ll calculateDepotToRequestCost(const int &depot, const Request &req) {
-        // if (depot_to_request_valid[depot][req.id]) {
-        //     return depot_to_request_cache[depot][req.id];
-        // }
-
-        ll cost;
+    std::pair<ll, ll> calculateDepotToRequestCost(const int &depot, const Request &req) {
+        ll complete_cost, travel_cost;
         if (req.pickup_action == PICKUP_CONTAINER) {
-            cost = getDistance(depot, trailer_point) +
-                   trailer_pickup_time +
-                   getDistance(trailer_point, req.pickup_point);
+            travel_cost = getDistance(depot, trailer_point) +
+                          getDistance(trailer_point, req.pickup_point);
+            complete_cost = travel_cost + trailer_pickup_time;
         } else {
-            cost = getDistance(depot, req.pickup_point);
+            travel_cost = complete_cost = getDistance(depot, req.pickup_point);
         }
-        // depot_to_request_cache[depot][req.id] = cost;
-        // depot_to_request_valid[depot][req.id] = true;
-        return cost;
+
+        return {complete_cost, travel_cost};
     }
 
-    ll calculateRequestToDepotCost(const Request &req, const int &depot) {
-        //     if (request_to_depot_valid[req.id][depot]) {
-        //         return request_to_depot_cache[req.id][depot];
-        //     }
-
-        ll cost;
+    std::pair<ll, ll> calculateRequestToDepotCost(const Request &req, const int &depot) {
+        ll complete_cost, travel_cost;
         if (req.drop_action == DROP_CONTAINER) {
-            cost = getDistance(req.drop_point, trailer_point) +
-                   trailer_pickup_time +
-                   getDistance(trailer_point, depot);
+            complete_cost = getDistance(req.drop_point, trailer_point) +
+                            trailer_pickup_time +
+                            getDistance(trailer_point, depot);
+            travel_cost = complete_cost - trailer_pickup_time;
         } else {
-            cost = getDistance(req.drop_point, depot);
+            travel_cost = complete_cost = getDistance(req.drop_point, depot);
         }
-        //     request_to_depot_cache[req.id][depot] = cost;
-        //     request_to_depot_valid[req.id][depot] = true;
-        return cost;
+
+        return {complete_cost, travel_cost};
     }
 
-    ll calculateRequestTransitionCost(const Request &curr_req, const Request &next_req) {
-        // if (request_transition_valid[curr_req.id][next_req.id]) {
-        //     return request_transition_cache[curr_req.id][next_req.id];
-        // }
-
-        ll cost;
+    std::pair<ll, ll> calculateRequestTransitionCost(const Request &curr_req, const Request &next_req) {
+        ll complete_cost, travel_cost;
         if (curr_req.drop_action == DROP_CONTAINER &&
             next_req.pickup_action == PICKUP_CONTAINER_TRAILER) {
-            cost = getDistance(curr_req.drop_point, trailer_point) +
-                   getDistance(trailer_point, next_req.pickup_point) +
-                   trailer_pickup_time;
+            complete_cost = getDistance(curr_req.drop_point, trailer_point) +
+                            getDistance(trailer_point, next_req.pickup_point) +
+                            trailer_pickup_time;
+            travel_cost = complete_cost - trailer_pickup_time;
         } else if (curr_req.drop_action == DROP_CONTAINER_TRAILER &&
                    next_req.pickup_action == PICKUP_CONTAINER) {
-            cost = getDistance(curr_req.drop_point, trailer_point) +
-                   getDistance(trailer_point, next_req.pickup_point) +
-                   trailer_pickup_time;
+            complete_cost = getDistance(curr_req.drop_point, trailer_point) +
+                            getDistance(trailer_point, next_req.pickup_point) +
+                            trailer_pickup_time;
+            travel_cost = complete_cost - trailer_pickup_time;
         } else {
-            cost = getDistance(curr_req.drop_point, next_req.pickup_point);
+            travel_cost = complete_cost = getDistance(curr_req.drop_point, next_req.pickup_point);
         }
-        // request_transition_cache[curr_req.id][next_req.id] = cost;
-        // request_transition_valid[curr_req.id][next_req.id] = true;
-        return cost;
+
+        return {complete_cost, travel_cost};
     }
 
-    ll calculateInsertionCost(const Route &route, const int request_id, std::list<int>::iterator position) {
+    std::pair<ll, ll> calculateInsertionCost(const Route &route, const int request_id, std::list<int>::iterator position) {
         const Request &req = requests[request_id];
-        ll costDelta = 0;
+        std::pair<ll, ll> costDelta = {0, 0};
 
         if (route.list_reqs.empty()) {
             // If route is empty, just calculate depot -> request -> depot
@@ -304,22 +305,22 @@ class PDPSolver_subtask_3 {
                         calculateRequestTransitionCost(prev_req, next_req);
         }
 
-        return route.complete_cost + costDelta;
+        return {route.complete_cost + costDelta.first, route.travel_cost + costDelta.second};
     }
 
-    ll calculateRemovalCost(Route &route, const int request_id) {
+    std::pair<ll, ll> calculateRemovalCost(Route &route, const int request_id) {
         auto it = std::find(route.list_reqs.begin(), route.list_reqs.end(), request_id);
         if (it == route.list_reqs.end())
-            return route.complete_cost; // Request not found
+            return {route.complete_cost, route.travel_cost}; // Request not found
 
         const Request &req = requests[request_id];
-        ll costDelta = -calculateRequestContextCost(req); // Remove request's own cost
+        auto costDelta = std::make_pair<ll, ll>(0, 0) - calculateRequestContextCost(req); // Remove request's own cost
 
         if (route.list_reqs.size() == 1) {
             // If this is the only request
             costDelta -= calculateDepotToRequestCost(route.depot, req);
             costDelta -= calculateRequestToDepotCost(req, route.depot);
-            return 0; // Route will be empty
+            return {0, 0}; // Route will be empty
         }
 
         if (it == route.list_reqs.begin()) {
@@ -343,18 +344,19 @@ class PDPSolver_subtask_3 {
             costDelta += calculateRequestTransitionCost(prev_req, next_req);
         }
 
-        return route.complete_cost + costDelta;
+        return {route.complete_cost + costDelta.first, route.travel_cost + costDelta.second};
     }
 
     void removeStopsByRequestId(Route &route, int request_id) {
         // Calculate new cost before modifying the list
-        ll newCost = calculateRemovalCost(route, request_id);
+        auto newCost = calculateRemovalCost(route, request_id);
 
         // Remove the request
         route.list_reqs.remove(request_id);
 
         // Update route cost
-        route.complete_cost = newCost;
+        route.complete_cost = newCost.first;
+        route.travel_cost = newCost.second;
     }
 
     // The updateRequestContext method becomes cleaner without trailer tracking
@@ -371,28 +373,28 @@ class PDPSolver_subtask_3 {
 
         if (it == route.list_reqs.begin()) {
             // First request
-            transitionCost += calculateDepotToRequestCost(route.depot, curr_req);
+            transitionCost += calculateDepotToRequestCost(route.depot, curr_req).first;
             if (std::next(it) != route.list_reqs.end()) {
                 const Request &next_req = requests[*std::next(it)];
-                transitionCost += calculateRequestTransitionCost(curr_req, next_req);
-                transitionCost -= calculateDepotToRequestCost(route.depot, next_req);
+                transitionCost += calculateRequestTransitionCost(curr_req, next_req).first;
+                transitionCost -= calculateDepotToRequestCost(route.depot, next_req).first;
             } else {
-                transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
+                transitionCost += calculateRequestToDepotCost(curr_req, route.depot).first;
             }
         } else {
             const Request &prev_req = requests[*std::prev(it)];
 
             if (std::next(it) == route.list_reqs.end()) {
                 // Last request
-                transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
-                transitionCost += calculateRequestToDepotCost(curr_req, route.depot);
-                transitionCost -= calculateRequestToDepotCost(prev_req, route.depot);
+                transitionCost += calculateRequestTransitionCost(prev_req, curr_req).first;
+                transitionCost += calculateRequestToDepotCost(curr_req, route.depot).first;
+                transitionCost -= calculateRequestToDepotCost(prev_req, route.depot).first;
             } else {
                 // Middle request
                 const Request &next_req = requests[*std::next(it)];
-                transitionCost += calculateRequestTransitionCost(prev_req, curr_req);
-                transitionCost += calculateRequestTransitionCost(curr_req, next_req);
-                transitionCost -= calculateRequestTransitionCost(prev_req, next_req);
+                transitionCost += calculateRequestTransitionCost(prev_req, curr_req).first;
+                transitionCost += calculateRequestTransitionCost(curr_req, next_req).first;
+                transitionCost -= calculateRequestTransitionCost(prev_req, next_req).first;
             }
         }
 
@@ -488,7 +490,7 @@ class PDPSolver_subtask_3 {
         std::shuffle(randomRequestIds.begin(), randomRequestIds.end(), gen);
 
         for (int req_id : randomRequestIds) {
-            ll bestCost = std::numeric_limits<ll>::max();
+            auto bestCost = std::make_pair(std::numeric_limits<ll>::max(), std::numeric_limits<ll>::max());
             int bestRoute = -1;
             std::list<int>::iterator bestPosition;
 
@@ -496,7 +498,7 @@ class PDPSolver_subtask_3 {
                 Route &route = currentSolution[routeIdx];
                 auto it = route.list_reqs.begin();
                 do {
-                    ll newCost = calculateInsertionCost(route, req_id, it);
+                    auto newCost = calculateInsertionCost(route, req_id, it);
 
                     if (newCost < bestCost) {
                         bestCost = newCost;
@@ -513,7 +515,8 @@ class PDPSolver_subtask_3 {
             if (bestRoute != -1) {
                 Route &route = currentSolution[bestRoute];
                 bestPosition = route.list_reqs.insert(bestPosition, req_id);
-                route.complete_cost = bestCost;
+                route.complete_cost = bestCost.first;
+                route.travel_cost = bestCost.second;
                 isRequestRemoved[req_id] = false;
                 requestContexts[req_id].position = bestPosition;
                 requestContexts[req_id].routeIdx = bestRoute;
@@ -536,13 +539,18 @@ class PDPSolver_subtask_3 {
     ll calculateF2() {
         ll totalCost = 0;
         for (const Route &route : currentSolution) {
-            totalCost += route.complete_cost;
+            totalCost += route.travel_cost;
         }
         return totalCost;
     }
 
     ll calculateSolutionCost() {
-        return alpha * calculateF1() + calculateF2();
+        ll complete_time = 0, travel_time = 0;
+        for (const Route &route : currentSolution) {
+            complete_time = std::max(complete_time, route.complete_cost);
+            travel_time += route.travel_cost;
+        }
+        return alpha * complete_time + travel_time;
     }
 
     void clearCaches() {
